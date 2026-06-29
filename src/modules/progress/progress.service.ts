@@ -22,10 +22,11 @@ export class ProgressService {
   }
   getHeatmap(query: HeatmapQueryDto) {
     const year = query.year ?? new Date().getUTCFullYear();
+    const filterType = query.filter ?? query.filterType ?? 'general';
     return this.prisma.dailyProgress.findMany({
       where: {
         userId: DEFAULT_USER_ID,
-        filterType: query.filterType ?? 'general',
+        filterType,
         progressDate: {
           gte: new Date(Date.UTC(year, 0, 1)),
           lt: new Date(Date.UTC(year + 1, 0, 1)),

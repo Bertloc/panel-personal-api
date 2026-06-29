@@ -14,6 +14,11 @@ export class HeatmapQueryDto {
   @Min(2000)
   @Max(2100)
   year?: number;
+
+  @IsOptional()
+  @IsIn(['general', 'habits', 'money', 'saving', 'debt'])
+  filter?: string;
+
   @IsOptional()
   @IsIn(['general', 'habits', 'money', 'saving', 'debt'])
   filterType?: string;

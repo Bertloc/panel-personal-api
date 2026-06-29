@@ -29,7 +29,7 @@ export class BudgetsService {
       },
       orderBy: [{ status: 'asc' }, { startDate: 'desc' }],
     });
-    if (!period) throw new NotFoundException('Current budget period not found');
+    if (!period) return { current: null, limits: [] };
     return this.withUsage(period);
   }
 
