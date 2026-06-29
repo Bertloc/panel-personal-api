@@ -1,13 +1,383 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
+}
+
+model Profile {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @unique @map("user_id") @db.Uuid
+  displayName String   @map("display_name")
+  email       String?
+  timezone    String   @default("America/Mexico_City")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  settings             AppSettings?
+  incomeEvents         IncomeEvent[]
+  categories           ExpenseCategory[]
+  expenses             Expense[]
+  budgetPeriods        BudgetPeriod[]
+  budgetLimits         BudgetLimit[]
+  recurringObligations RecurringObligation[]
+  debts                Debt[]
+  debtPayments         DebtPayment[]
+  savingsGoals         SavingsGoal[]
+  savingsMovements     SavingsMovement[]
+  habits               Habit[]
+  habitLogs            HabitLog[]
+  dailyProgress        DailyProgress[]
+  projects             Project[]
+  projectTasks         ProjectTask[]
+  projectBudgets       ProjectBudget[]
+
+  @@map("profiles")
+}
+
+model AppSettings {
+  id                     String   @id @default(uuid()) @db.Uuid
+  userId                 String   @unique @map("user_id") @db.Uuid
+  currency               String   @default("MXN")
+  incomeFrequency        String   @map("income_frequency")
+  defaultFoodBudget      Decimal  @map("default_food_budget") @db.Decimal(12, 2)
+  dailyTransportEstimate Decimal  @map("daily_transport_estimate") @db.Decimal(12, 2)
+  debtPaymentDay         Int?     @map("debt_payment_day")
+  gymPaymentDay          Int?     @map("gym_payment_day")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  profile Profile @relation(fields: [userId], references: [userId])
+
+  @@map("app_settings")
+}
+
+model IncomeEvent {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  amount     Decimal  @db.Decimal(12, 2)
+  incomeDate DateTime @map("income_date") @db.Date
+  source     String
+  note       String?
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  profile Profile @relation(fields: [userId], references: [userId])
+
+  @@index([userId, incomeDate])
+  @@map("income_events")
+}
+
+model ExpenseCategory {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  name      String
+  slug      String
+  type      String
+  isFixed   Boolean  @default(false) @map("is_fixed")
+  isActive  Boolean  @default(true) @map("is_active")
+  color     String?
+  icon      String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  profile              Profile               @relation(fields: [userId], references: [userId])
+  expenses             Expense[]
+  budgetLimits         BudgetLimit[]
+  recurringObligations RecurringObligation[]
+
+  @@unique([userId, slug])
+  @@index([userId, isActive])
+  @@map("expense_categories")
+}
+
+model Expense {
+  id                       String   @id @default(uuid()) @db.Uuid
+  userId                   String   @map("user_id") @db.Uuid
+  categoryId               String   @map("category_id") @db.Uuid
+  amount                   Decimal  @db.Decimal(12, 2)
+  expenseDate              DateTime @map("expense_date") @db.Date
+  note                     String?
+  source                   String
+  paymentMethod            String?  @map("payment_method")
+  projectId                String?  @map("project_id") @db.Uuid
+  relatedDebtPaymentId     String?  @map("related_debt_payment_id") @db.Uuid
+  relatedSavingsMovementId String?  @map("related_savings_movement_id") @db.Uuid
+  createdAt                DateTime @default(now()) @map("created_at")
+  updatedAt                DateTime @updatedAt @map("updated_at")
+
+  profile                Profile          @relation(fields: [userId], references: [userId])
+  category               ExpenseCategory  @relation(fields: [categoryId], references: [id])
+  project                Project?         @relation(fields: [projectId], references: [id])
+  relatedDebtPayment     DebtPayment?     @relation(fields: [relatedDebtPaymentId], references: [id])
+  relatedSavingsMovement SavingsMovement? @relation(fields: [relatedSavingsMovementId], references: [id])
+
+  @@index([userId, expenseDate])
+  @@index([userId, categoryId, expenseDate])
+  @@index([projectId])
+  @@map("expenses")
+}
+
+model BudgetPeriod {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  name           String
+  periodType     String   @map("period_type")
+  startDate      DateTime @map("start_date") @db.Date
+  endDate        DateTime @map("end_date") @db.Date
+  expectedIncome Decimal? @map("expected_income") @db.Decimal(12, 2)
+  status         String
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  profile Profile       @relation(fields: [userId], references: [userId])
+  limits  BudgetLimit[]
+
+  @@index([userId, startDate, endDate])
+  @@index([userId, status])
+  @@map("budget_periods")
+}
+
+model BudgetLimit {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  budgetPeriodId String   @map("budget_period_id") @db.Uuid
+  categoryId     String   @map("category_id") @db.Uuid
+  limitAmount    Decimal  @map("limit_amount") @db.Decimal(12, 2)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  profile      Profile         @relation(fields: [userId], references: [userId])
+  budgetPeriod BudgetPeriod    @relation(fields: [budgetPeriodId], references: [id])
+  category     ExpenseCategory @relation(fields: [categoryId], references: [id])
+
+  @@unique([budgetPeriodId, categoryId])
+  @@index([userId])
+  @@index([categoryId])
+  @@map("budget_limits")
+}
+
+model RecurringObligation {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  categoryId  String?   @map("category_id") @db.Uuid
+  name        String
+  amount      Decimal   @db.Decimal(12, 2)
+  frequency   String
+  dueDay      Int?      @map("due_day") @db.SmallInt
+  nextDueDate DateTime? @map("next_due_date") @db.Date
+  isRequired  Boolean   @default(true) @map("is_required")
+  isActive    Boolean   @default(true) @map("is_active")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  profile  Profile          @relation(fields: [userId], references: [userId])
+  category ExpenseCategory? @relation(fields: [categoryId], references: [id])
+
+  @@index([userId, nextDueDate])
+  @@index([userId, isActive])
+  @@map("recurring_obligations")
+}
+
+model Debt {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  name           String
+  initialAmount  Decimal  @map("initial_amount") @db.Decimal(12, 2)
+  currentAmount  Decimal  @map("current_amount") @db.Decimal(12, 2)
+  minimumPayment Decimal  @map("minimum_payment") @db.Decimal(12, 2)
+  paymentDay     Int      @map("payment_day") @db.SmallInt
+  interestRate   Decimal? @map("interest_rate") @db.Decimal(5, 2)
+  status         String
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  profile  Profile       @relation(fields: [userId], references: [userId])
+  payments DebtPayment[]
+
+  @@index([userId, status])
+  @@map("debts")
+}
+
+model DebtPayment {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  debtId      String   @map("debt_id") @db.Uuid
+  amount      Decimal  @db.Decimal(12, 2)
+  paymentDate DateTime @map("payment_date") @db.Date
+  paymentType String   @map("payment_type")
+  note        String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  profile  Profile   @relation(fields: [userId], references: [userId])
+  debt     Debt      @relation(fields: [debtId], references: [id])
+  expenses Expense[]
+
+  @@index([userId, paymentDate])
+  @@index([debtId, paymentDate])
+  @@map("debt_payments")
+}
+
+model SavingsGoal {
+  id            String    @id @default(uuid()) @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  name          String
+  targetAmount  Decimal   @map("target_amount") @db.Decimal(12, 2)
+  currentAmount Decimal   @default(0) @map("current_amount") @db.Decimal(12, 2)
+  targetDate    DateTime? @map("target_date") @db.Date
+  status        String
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  profile   Profile           @relation(fields: [userId], references: [userId])
+  movements SavingsMovement[]
+
+  @@index([userId, status])
+  @@map("savings_goals")
+}
+
+model SavingsMovement {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  savingsGoalId String   @map("savings_goal_id") @db.Uuid
+  amount        Decimal  @db.Decimal(12, 2)
+  movementDate  DateTime @map("movement_date") @db.Date
+  movementType  String   @map("movement_type")
+  note          String?
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  profile     Profile     @relation(fields: [userId], references: [userId])
+  savingsGoal SavingsGoal @relation(fields: [savingsGoalId], references: [id])
+  expenses    Expense[]
+
+  @@index([userId, movementDate])
+  @@index([savingsGoalId, movementDate])
+  @@map("savings_movements")
+}
+
+model Habit {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  name        String
+  description String?
+  moment      String
+  isFinancial Boolean  @default(false) @map("is_financial")
+  isKeyHabit  Boolean  @default(false) @map("is_key_habit")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  profile Profile    @relation(fields: [userId], references: [userId])
+  logs    HabitLog[]
+
+  @@unique([userId, name])
+  @@index([userId, isActive])
+  @@map("habits")
+}
+
+model HabitLog {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  habitId   String   @map("habit_id") @db.Uuid
+  logDate   DateTime @map("log_date") @db.Date
+  status    String
+  note      String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  profile Profile @relation(fields: [userId], references: [userId])
+  habit   Habit   @relation(fields: [habitId], references: [id])
+
+  @@unique([userId, habitId, logDate])
+  @@index([userId, logDate])
+  @@index([habitId, logDate])
+  @@map("habit_logs")
+}
+
+model DailyProgress {
+  id                    String   @id @default(uuid()) @db.Uuid
+  userId                String   @map("user_id") @db.Uuid
+  progressDate          DateTime @map("progress_date") @db.Date
+  score                 Int      @db.SmallInt
+  value                 Int      @db.SmallInt
+  state                 String
+  expenseRegistered     Boolean  @map("expense_registered")
+  withinDailyLimit      Boolean  @map("within_daily_limit")
+  habitsCompletionRate  Decimal  @map("habits_completion_rate") @db.Decimal(5, 2)
+  financialKeyHabitDone Boolean  @map("financial_key_habit_done")
+  savedOrPaidDebt       Boolean  @map("saved_or_paid_debt")
+  filterType            String   @map("filter_type")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  profile Profile @relation(fields: [userId], references: [userId])
+
+  @@unique([userId, progressDate, filterType])
+  @@index([userId, filterType, progressDate])
+  @@map("daily_progress")
+}
+
+model Project {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  name        String
+  description String?
+  status      String
+  priority    String
+  startDate   DateTime? @map("start_date") @db.Date
+  targetDate  DateTime? @map("target_date") @db.Date
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  profile  Profile         @relation(fields: [userId], references: [userId])
+  tasks    ProjectTask[]
+  budgets  ProjectBudget[]
+  expenses Expense[]
+
+  @@index([userId, status])
+  @@index([userId, priority])
+  @@map("projects")
+}
+
+model ProjectTask {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  projectId   String    @map("project_id") @db.Uuid
+  title       String
+  description String?
+  status      String
+  priority    String
+  dueDate     DateTime? @map("due_date") @db.Date
+  completedAt DateTime? @map("completed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  profile Profile @relation(fields: [userId], references: [userId])
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@index([userId, projectId])
+  @@index([userId, status])
+  @@index([userId, dueDate])
+  @@map("project_tasks")
+}
+
+model ProjectBudget {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  projectId     String   @map("project_id") @db.Uuid
+  name          String
+  plannedAmount Decimal  @map("planned_amount") @db.Decimal(12, 2)
+  spentAmount   Decimal  @default(0) @map("spent_amount") @db.Decimal(12, 2)
+  notes         String?
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  profile Profile @relation(fields: [userId], references: [userId])
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@index([userId, projectId])
+  @@map("project_budgets")
 }
