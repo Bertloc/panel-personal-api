@@ -1,11 +1,22 @@
 import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsNumber, IsOptional, Max, Min } from 'class-validator';
+import {
+  IsIn,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Length,
+  Max,
+  Min,
+} from 'class-validator';
+import { BUDGET_MODES, INCOME_FREQUENCIES } from '../../common';
 
 export class UpdateSettingsDto {
-  @IsOptional() @IsIn(['MXN', 'USD']) currency?: string;
+  @IsOptional() @IsString() @Length(3, 3) currency?: string;
   @IsOptional()
-  @IsIn(['weekly', 'biweekly', 'monthly'])
+  @IsIn(INCOME_FREQUENCIES)
   incomeFrequency?: string;
+  @IsOptional() @IsIn(BUDGET_MODES) budgetMode?: string;
   @IsOptional()
   @Type(() => Number)
   @IsNumber()

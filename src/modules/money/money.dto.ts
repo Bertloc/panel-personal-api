@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
   IsDateString,
@@ -7,18 +7,28 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   Min,
   MinLength,
 } from 'class-validator';
 
-const CATEGORY_TYPES = ['expense', 'saving', 'debt', 'income_adjustment'];
+const CATEGORY_TYPES = [
+  'expense',
+  'saving',
+  'debt',
+  'income',
+  'project',
+  'income_adjustment',
+];
+const CATEGORY_PRIORITIES = ['low', 'medium', 'high', 'essential'];
 const EXPENSE_SOURCES = ['manual', 'recurrent', 'imported'];
 const PAYMENT_METHODS = ['cash', 'debit', 'credit', 'transfer', 'other'];
 
 export class CreateExpenseCategoryDto {
-  @IsString() @MinLength(1) name!: string;
-  @IsString() @MinLength(1) slug!: string;
+  @IsString() @Matches(/\S/) name!: string;
+  @IsOptional() @IsString() @MinLength(1) slug?: string;
   @IsIn(CATEGORY_TYPES) type!: string;
+  @IsOptional() @IsIn(CATEGORY_PRIORITIES) priority?: string;
   @IsOptional() @IsBoolean() isFixed?: boolean;
   @IsOptional() @IsBoolean() isActive?: boolean;
   @IsOptional() @IsString() color?: string;
@@ -26,13 +36,22 @@ export class CreateExpenseCategoryDto {
 }
 
 export class UpdateExpenseCategoryDto {
-  @IsOptional() @IsString() @MinLength(1) name?: string;
+  @IsOptional() @IsString() @Matches(/\S/) name?: string;
   @IsOptional() @IsString() @MinLength(1) slug?: string;
   @IsOptional() @IsIn(CATEGORY_TYPES) type?: string;
+  @IsOptional() @IsIn(CATEGORY_PRIORITIES) priority?: string;
   @IsOptional() @IsBoolean() isFixed?: boolean;
   @IsOptional() @IsBoolean() isActive?: boolean;
   @IsOptional() @IsString() color?: string;
   @IsOptional() @IsString() icon?: string;
+}
+
+export class CategoryFiltersDto {
+  @IsOptional() @IsIn(CATEGORY_TYPES) type?: string;
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  includeInactive?: boolean;
 }
 
 export class CreateExpenseDto {

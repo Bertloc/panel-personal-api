@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+} from '@nestjs/common';
 import {
   CreateSavingsGoalDto,
   CreateSavingsMovementDto,
@@ -22,6 +30,9 @@ export class SavingsController {
     @Body() dto: UpdateSavingsGoalDto,
   ) {
     return this.service.update(id, dto);
+  }
+  @Delete('goals/:id') remove(@Param('id') id: string) {
+    return this.service.remove(id);
   }
   @Post('goals/:id/movements') addMovement(
     @Param('id') id: string,

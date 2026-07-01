@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -7,6 +8,7 @@ import { Prisma } from '@prisma/client';
 import { DEFAULT_USER_ID } from '../../common';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
+  CategoryFiltersDto,
   CreateExpenseCategoryDto,
   CreateExpenseDto,
   ExpenseFiltersDto,
@@ -18,35 +20,63 @@ import {
 export class MoneyService {
   constructor(private readonly prisma: PrismaService) {}
 
-  getCategories() {
+  getCategories(filters: CategoryFiltersDto) {
     return this.prisma.expenseCategory.findMany({
-      where: { userId: DEFAULT_USER_ID, isActive: true },
+      where: {
+        userId: DEFAULT_USER_ID,
+        type: filters.type,
+        isActive: filters.includeInactive ? undefined : true,
+      },
       orderBy: { name: 'asc' },
     });
   }
 
   async createCategory(dto: CreateExpenseCategoryDto) {
+    const slug = this.toSlug(dto.name);
     const exists = await this.prisma.expenseCategory.findUnique({
-      where: { userId_slug: { userId: DEFAULT_USER_ID, slug: dto.slug } },
+      where: { userId_slug: { userId: DEFAULT_USER_ID, slug } },
     });
-    if (exists) throw new ConflictException('Category slug already exists');
+    if (exists?.isActive)
+      throw new ConflictException('Category slug already exists');
+    const data = { ...dto };
+    delete data.slug;
+    if (exists)
+      return this.prisma.expenseCategory.update({
+        where: { id: exists.id, userId: DEFAULT_USER_ID },
+        data: { ...data, slug, isActive: true },
+      });
     return this.prisma.expenseCategory.create({
-      data: { ...dto, userId: DEFAULT_USER_ID },
+      data: { ...data, slug, userId: DEFAULT_USER_ID },
     });
   }
 
   async updateCategory(id: string, dto: UpdateExpenseCategoryDto) {
-    await this.requireCategory(id);
-    if (dto.slug) {
+    await this.requireCategory(id, false);
+    const slug = dto.name
+      ? this.toSlug(dto.name)
+      : dto.slug
+        ? this.toSlug(dto.slug)
+        : undefined;
+    if (slug) {
       const duplicate = await this.prisma.expenseCategory.findFirst({
-        where: { userId: DEFAULT_USER_ID, slug: dto.slug, NOT: { id } },
+        where: { userId: DEFAULT_USER_ID, slug, NOT: { id } },
       });
       if (duplicate)
         throw new ConflictException('Category slug already exists');
     }
+    const data = { ...dto };
+    delete data.slug;
     return this.prisma.expenseCategory.update({
       where: { id, userId: DEFAULT_USER_ID },
-      data: dto,
+      data: { ...data, slug },
+    });
+  }
+
+  async deleteCategory(id: string) {
+    await this.requireCategory(id, false);
+    return this.prisma.expenseCategory.update({
+      where: { id, userId: DEFAULT_USER_ID },
+      data: { isActive: false },
     });
   }
 
@@ -120,12 +150,28 @@ export class MoneyService {
     });
   }
 
-  private async requireCategory(id: string) {
+  private async requireCategory(id: string, activeOnly = true) {
     const category = await this.prisma.expenseCategory.findFirst({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: {
+        id,
+        userId: DEFAULT_USER_ID,
+        isActive: activeOnly ? true : undefined,
+      },
     });
     if (!category) throw new NotFoundException('Expense category not found');
     return category;
+  }
+
+  private toSlug(value: string) {
+    const slug = value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '');
+    if (!slug) throw new BadRequestException('Category name is invalid');
+    return slug;
   }
 
   private async requireProject(id: string) {

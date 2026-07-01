@@ -11,6 +11,10 @@ import { HabitsModule } from './modules/habits/habits.module';
 import { ProgressModule } from './modules/progress/progress.module';
 import { ProjectsModule } from './modules/projects/projects.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { IncomeModule } from './modules/income/income.module';
+import { OnboardingModule } from './modules/onboarding/onboarding.module';
+import { ProfilesModule } from './modules/profiles/profiles.module';
+import { RecurringPaymentsModule } from './modules/recurring-payments/recurring-payments.module';
 
 @Module({
   imports: [
@@ -24,6 +28,10 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
     ProgressModule,
     ProjectsModule,
     DashboardModule,
+    ProfilesModule,
+    IncomeModule,
+    OnboardingModule,
+    RecurringPaymentsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -6,14 +6,50 @@ const prisma = new PrismaService();
 async function seed() {
   await prisma.profile.upsert({
     where: { userId: DEFAULT_USER_ID },
-    create: { userId: DEFAULT_USER_ID, displayName: 'Personal Profile' },
+    create: {
+      userId: DEFAULT_USER_ID,
+      displayName: 'Personal Profile',
+      currency: 'MXN',
+    },
     update: {},
   });
   await prisma.appSettings.upsert({
     where: { userId: DEFAULT_USER_ID },
-    create: { userId: DEFAULT_USER_ID, currency: 'MXN', incomeFrequency: 'biweekly', defaultFoodBudget: 700, dailyTransportEstimate: 20, debtPaymentDay: 15, gymPaymentDay: 19 },
+    create: {
+      userId: DEFAULT_USER_ID,
+      currency: 'MXN',
+      incomeFrequency: 'biweekly',
+      budgetMode: 'adjusted',
+      defaultFoodBudget: 700,
+      dailyTransportEstimate: 20,
+      debtPaymentDay: 15,
+      gymPaymentDay: 19,
+    },
     update: {},
   });
+  await prisma.incomeSource.upsert({
+    where: {
+      userId_name: {
+        userId: DEFAULT_USER_ID,
+        name: 'Ingreso principal',
+      },
+    },
+    create: {
+      userId: DEFAULT_USER_ID,
+      name: 'Ingreso principal',
+      amount: 4730,
+      frequency: 'biweekly',
+    },
+    update: {},
+  });
+  const financialDataCount = await Promise.all([
+    prisma.expenseCategory.count({ where: { userId: DEFAULT_USER_ID } }),
+    prisma.debt.count({ where: { userId: DEFAULT_USER_ID } }),
+    prisma.recurringObligation.count({ where: { userId: DEFAULT_USER_ID } }),
+    prisma.expense.count({ where: { userId: DEFAULT_USER_ID } }),
+  ]);
+  if (financialDataCount.some(Boolean)) return;
+
   const definitions = [
     ['Comida', 'comida', 'expense', false],
     ['Transporte', 'transporte', 'expense', false],

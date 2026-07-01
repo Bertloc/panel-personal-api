@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { MoneyService } from './money.service';
 import {
+  CategoryFiltersDto,
   CreateExpenseCategoryDto,
   CreateExpenseDto,
   ExpenseFiltersDto,
@@ -22,8 +23,8 @@ export class MoneyController {
   constructor(private readonly moneyService: MoneyService) {}
 
   @Get('categories')
-  getCategories() {
-    return this.moneyService.getCategories();
+  getCategories(@Query() filters: CategoryFiltersDto) {
+    return this.moneyService.getCategories(filters);
   }
 
   @Post('categories')
@@ -37,6 +38,11 @@ export class MoneyController {
     @Body() dto: UpdateExpenseCategoryDto,
   ) {
     return this.moneyService.updateCategory(id, dto);
+  }
+
+  @Delete('categories/:id')
+  deleteCategory(@Param('id') id: string) {
+    return this.moneyService.deleteCategory(id);
   }
 
   @Get('expenses')

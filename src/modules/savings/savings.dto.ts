@@ -13,9 +13,11 @@ export class CreateSavingsGoalDto {
   @Type(() => Number) @IsNumber() @Min(0.01) targetAmount!: number;
   @IsOptional() @Type(() => Number) @IsNumber() @Min(0) currentAmount?: number;
   @IsOptional() @IsDateString() targetDate?: string;
+  @IsOptional() @IsIn(['low', 'medium', 'high', 'urgent']) priority?: string;
   @IsOptional()
   @IsIn(['active', 'completed', 'paused', 'cancelled'])
   status?: string;
+  @IsOptional() @IsString() notes?: string;
 }
 export class UpdateSavingsGoalDto {
   @IsOptional() @IsString() @MinLength(1) name?: string;
@@ -24,10 +26,13 @@ export class UpdateSavingsGoalDto {
   @IsNumber()
   @Min(0.01)
   targetAmount?: number;
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) currentAmount?: number;
   @IsOptional() @IsDateString() targetDate?: string;
+  @IsOptional() @IsIn(['low', 'medium', 'high', 'urgent']) priority?: string;
   @IsOptional()
   @IsIn(['active', 'completed', 'paused', 'cancelled'])
   status?: string;
+  @IsOptional() @IsString() notes?: string;
 }
 export class CreateSavingsMovementDto {
   @Type(() => Number) @IsNumber() @Min(0.01) amount!: number;

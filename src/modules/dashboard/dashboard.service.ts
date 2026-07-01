@@ -13,16 +13,23 @@ export class DashboardService {
     weekStart.setUTCDate(today.getUTCDate() - ((today.getUTCDay() + 6) % 7));
     const [
       settings,
+      profile,
       month,
       week,
       recentExpenses,
       categoryTotals,
       activeDebts,
       activeSavingsGoals,
+      incomeSources,
+      currentBudget,
+      upcomingPayments,
       habits,
       activeProjects,
     ] = await Promise.all([
       this.prisma.appSettings.findUnique({
+        where: { userId: DEFAULT_USER_ID },
+      }),
+      this.prisma.profile.findUnique({
         where: { userId: DEFAULT_USER_ID },
       }),
       this.prisma.expense.aggregate({
@@ -54,6 +61,18 @@ export class DashboardService {
         where: { userId: DEFAULT_USER_ID, status: 'active' },
         orderBy: { createdAt: 'asc' },
       }),
+      this.prisma.incomeSource.findMany({
+        where: { userId: DEFAULT_USER_ID, isActive: true },
+        orderBy: { createdAt: 'asc' },
+      }),
+      this.prisma.budgetPeriod.findFirst({
+        where: { userId: DEFAULT_USER_ID, status: 'active' },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.recurringObligation.findMany({
+        where: { userId: DEFAULT_USER_ID, isActive: true },
+        orderBy: [{ nextDueDate: 'asc' }, { createdAt: 'asc' }],
+      }),
       this.prisma.habit.findMany({
         where: { userId: DEFAULT_USER_ID, isActive: true },
         include: {
@@ -81,8 +100,54 @@ export class DashboardService {
     const categoryById = new Map(
       categories.map((category) => [category.id, category]),
     );
+    const [periodExpenses, budgetLimits] = currentBudget
+      ? await Promise.all([
+          this.prisma.expense.aggregate({
+            where: {
+              userId: DEFAULT_USER_ID,
+              expenseDate: {
+                gte: currentBudget.startDate,
+                lte: currentBudget.endDate,
+              },
+            },
+            _sum: { amount: true },
+          }),
+          this.prisma.budgetLimit.aggregate({
+            where: {
+              userId: DEFAULT_USER_ID,
+              budgetPeriodId: currentBudget.id,
+            },
+            _sum: { limitAmount: true },
+          }),
+        ])
+      : [month, null];
+    // ponytail: source amounts represent one current-period payment; normalize mixed schedules when needed.
+    const periodIncome = incomeSources.reduce(
+      (sum, source) => sum + Number(source.amount),
+      0,
+    );
+    const periodSpent = Number(periodExpenses._sum.amount ?? 0);
+    const upcomingTotal = upcomingPayments.reduce(
+      (sum, payment) => sum + Number(payment.amount),
+      0,
+    );
+    const totalLimit = Number(budgetLimits?._sum.limitAmount ?? 0);
     return {
       settings,
+      onboardingCompleted: profile?.onboardingCompleted ?? false,
+      availableToday: periodIncome - periodSpent - upcomingTotal,
+      periodIncome,
+      periodSpent,
+      budgetRemaining: currentBudget ? totalLimit - periodSpent : null,
+      upcomingPayments,
+      totalDebt: activeDebts.reduce(
+        (sum, debt) => sum + Number(debt.currentAmount),
+        0,
+      ),
+      totalSavingsGoal: activeSavingsGoals.reduce(
+        (sum, goal) => sum + Number(goal.targetAmount),
+        0,
+      ),
       currentMonthExpenses: month._sum.amount ?? 0,
       currentWeekExpenses: week._sum.amount ?? 0,
       recentExpenses,

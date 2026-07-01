@@ -7,16 +7,20 @@ datasource db {
 }
 
 model Profile {
-  id          String   @id @default(uuid()) @db.Uuid
-  userId      String   @unique @map("user_id") @db.Uuid
-  displayName String   @map("display_name")
-  email       String?
-  timezone    String   @default("America/Mexico_City")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id                    String    @id @default(uuid()) @db.Uuid
+  userId                String    @unique @map("user_id") @db.Uuid
+  displayName           String    @map("display_name")
+  email                 String?
+  currency              String    @default("MXN")
+  timezone              String    @default("America/Mexico_City")
+  onboardingCompleted   Boolean   @default(false) @map("onboarding_completed")
+  onboardingCompletedAt DateTime? @map("onboarding_completed_at") @db.Timestamptz
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
 
   settings             AppSettings?
   incomeEvents         IncomeEvent[]
+  incomeSources        IncomeSource[]
   categories           ExpenseCategory[]
   expenses             Expense[]
   budgetPeriods        BudgetPeriod[]
@@ -41,6 +45,7 @@ model AppSettings {
   userId                 String   @unique @map("user_id") @db.Uuid
   currency               String   @default("MXN")
   incomeFrequency        String   @map("income_frequency")
+  budgetMode             String   @default("adjusted") @map("budget_mode")
   defaultFoodBudget      Decimal  @map("default_food_budget") @db.Decimal(12, 2)
   dailyTransportEstimate Decimal  @map("daily_transport_estimate") @db.Decimal(12, 2)
   debtPaymentDay         Int?     @map("debt_payment_day")
@@ -51,6 +56,25 @@ model AppSettings {
   profile Profile @relation(fields: [userId], references: [userId])
 
   @@map("app_settings")
+}
+
+model IncomeSource {
+  id              String    @id @default(uuid()) @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+  name            String
+  amount          Decimal   @db.Decimal(12, 2)
+  frequency       String
+  nextPaymentDate DateTime? @map("next_payment_date") @db.Date
+  isFixed         Boolean   @default(true) @map("is_fixed")
+  isActive        Boolean   @default(true) @map("is_active")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  profile Profile @relation(fields: [userId], references: [userId])
+
+  @@unique([userId, name])
+  @@index([userId, isActive])
+  @@map("income_sources")
 }
 
 model IncomeEvent {
@@ -75,6 +99,7 @@ model ExpenseCategory {
   name      String
   slug      String
   type      String
+  priority  String   @default("medium")
   isFixed   Boolean  @default(false) @map("is_fixed")
   isActive  Boolean  @default(true) @map("is_active")
   color     String?
@@ -168,7 +193,9 @@ model RecurringObligation {
   dueDay      Int?      @map("due_day") @db.SmallInt
   nextDueDate DateTime? @map("next_due_date") @db.Date
   isRequired  Boolean   @default(true) @map("is_required")
+  isFixed     Boolean   @default(true) @map("is_fixed")
   isActive    Boolean   @default(true) @map("is_active")
+  notes       String?
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
@@ -181,17 +208,21 @@ model RecurringObligation {
 }
 
 model Debt {
-  id             String   @id @default(uuid()) @db.Uuid
-  userId         String   @map("user_id") @db.Uuid
+  id             String    @id @default(uuid()) @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
   name           String
-  initialAmount  Decimal  @map("initial_amount") @db.Decimal(12, 2)
-  currentAmount  Decimal  @map("current_amount") @db.Decimal(12, 2)
-  minimumPayment Decimal  @map("minimum_payment") @db.Decimal(12, 2)
-  paymentDay     Int      @map("payment_day") @db.SmallInt
-  interestRate   Decimal? @map("interest_rate") @db.Decimal(5, 2)
+  initialAmount  Decimal   @map("initial_amount") @db.Decimal(12, 2)
+  currentAmount  Decimal   @map("current_amount") @db.Decimal(12, 2)
+  minimumPayment Decimal   @map("minimum_payment") @db.Decimal(12, 2)
+  paymentDay     Int       @map("payment_day") @db.SmallInt
+  dueDate        DateTime? @map("due_date") @db.Date
+  strategy       String    @default("custom")
+  priority       String    @default("medium")
+  interestRate   Decimal?  @map("interest_rate") @db.Decimal(5, 2)
   status         String
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
+  notes          String?
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
 
   profile  Profile       @relation(fields: [userId], references: [userId])
   payments DebtPayment[]
@@ -227,7 +258,9 @@ model SavingsGoal {
   targetAmount  Decimal   @map("target_amount") @db.Decimal(12, 2)
   currentAmount Decimal   @default(0) @map("current_amount") @db.Decimal(12, 2)
   targetDate    DateTime? @map("target_date") @db.Date
+  priority      String    @default("medium")
   status        String
+  notes         String?
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
 
