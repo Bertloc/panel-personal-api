@@ -13,6 +13,7 @@ import {
   CreateDebtPaymentDto,
   DebtFiltersDto,
   UpdateDebtDto,
+  UpdateDebtPaymentDto,
 } from './debts.dto';
 import { DebtsService } from './debts.service';
 @Controller('api/debts')
@@ -41,6 +42,17 @@ export class DebtsController {
   }
   @Get(':id/payments') getPayments(@Param('id') id: string) {
     return this.service.getPayments(id);
+  }
+  @Patch('payments/:paymentId') updatePayment(
+    @Param('paymentId') paymentId: string,
+    @Body() dto: UpdateDebtPaymentDto,
+  ) {
+    return this.service.updatePayment(paymentId, dto);
+  }
+  @Delete('payments/:paymentId') removePayment(
+    @Param('paymentId') paymentId: string,
+  ) {
+    return this.service.removePayment(paymentId);
   }
   @Get(':id/projection') projection(@Param('id') id: string) {
     return this.service.projection(id);

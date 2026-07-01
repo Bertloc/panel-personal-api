@@ -15,6 +15,7 @@ import { IncomeModule } from './modules/income/income.module';
 import { OnboardingModule } from './modules/onboarding/onboarding.module';
 import { ProfilesModule } from './modules/profiles/profiles.module';
 import { RecurringPaymentsModule } from './modules/recurring-payments/recurring-payments.module';
+import { RoutinesModule } from './modules/routines/routines.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { RecurringPaymentsModule } from './modules/recurring-payments/recurring-
     IncomeModule,
     OnboardingModule,
     RecurringPaymentsModule,
+    RoutinesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

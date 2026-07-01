@@ -37,6 +37,19 @@ export class UpdateSavingsGoalDto {
 export class CreateSavingsMovementDto {
   @Type(() => Number) @IsNumber() @Min(0.01) amount!: number;
   @IsDateString() movementDate!: string;
-  @IsIn(['deposit', 'withdrawal', 'adjustment']) movementType!: string;
+  @IsOptional() @IsIn(['deposit', 'withdrawal', 'adjustment']) type?: string;
+  @IsOptional()
+  @IsIn(['deposit', 'withdrawal', 'adjustment'])
+  movementType?: string;
+  @IsOptional() @IsString() note?: string;
+}
+
+export class UpdateSavingsMovementDto {
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0.01) amount?: number;
+  @IsOptional() @IsDateString() movementDate?: string;
+  @IsOptional() @IsIn(['deposit', 'withdrawal', 'adjustment']) type?: string;
+  @IsOptional()
+  @IsIn(['deposit', 'withdrawal', 'adjustment'])
+  movementType?: string;
   @IsOptional() @IsString() note?: string;
 }

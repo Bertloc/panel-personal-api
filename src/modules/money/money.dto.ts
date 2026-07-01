@@ -3,6 +3,7 @@ import {
   IsBoolean,
   IsDateString,
   IsIn,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
@@ -10,6 +11,7 @@ import {
   Matches,
   Min,
   MinLength,
+  Max,
 } from 'class-validator';
 
 const CATEGORY_TYPES = [
@@ -58,7 +60,7 @@ export class CreateExpenseDto {
   @IsUUID() categoryId!: string;
   @Type(() => Number) @IsNumber() @Min(0.01) amount!: number;
   @IsDateString() expenseDate!: string;
-  @IsIn(EXPENSE_SOURCES) source!: string;
+  @IsOptional() @IsIn(EXPENSE_SOURCES) source?: string;
   @IsOptional() @IsIn(PAYMENT_METHODS) paymentMethod?: string;
   @IsOptional() @IsString() note?: string;
   @IsOptional() @IsUUID() projectId?: string;
@@ -79,4 +81,7 @@ export class ExpenseFiltersDto {
   @IsOptional() @IsDateString() endDate?: string;
   @IsOptional() @IsUUID() categoryId?: string;
   @IsOptional() @IsIn(EXPENSE_SOURCES) source?: string;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) limit?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;
+  @IsOptional() @IsIn(['asc', 'desc']) sort?: 'asc' | 'desc';
 }

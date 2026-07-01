@@ -69,6 +69,19 @@ export class DebtFiltersDto {
 export class CreateDebtPaymentDto {
   @Type(() => Number) @IsNumber() @Min(0.01) amount!: number;
   @IsDateString() paymentDate!: string;
-  @IsIn(['required', 'extra', 'adjustment']) paymentType!: string;
+  @IsOptional() @IsIn(['minimum', 'extra', 'adjustment']) type?: string;
+  @IsOptional()
+  @IsIn(['required', 'minimum', 'extra', 'adjustment'])
+  paymentType?: string;
+  @IsOptional() @IsString() note?: string;
+}
+
+export class UpdateDebtPaymentDto {
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0.01) amount?: number;
+  @IsOptional() @IsDateString() paymentDate?: string;
+  @IsOptional() @IsIn(['minimum', 'extra', 'adjustment']) type?: string;
+  @IsOptional()
+  @IsIn(['required', 'minimum', 'extra', 'adjustment'])
+  paymentType?: string;
   @IsOptional() @IsString() note?: string;
 }

@@ -10,6 +10,7 @@ import {
   CreateSavingsGoalDto,
   CreateSavingsMovementDto,
   UpdateSavingsGoalDto,
+  UpdateSavingsMovementDto,
 } from './savings.dto';
 @Injectable()
 export class SavingsService {
@@ -60,15 +61,18 @@ export class SavingsService {
   }
   async addMovement(id: string, dto: CreateSavingsMovementDto) {
     const goal = await this.get(id);
-    const delta = dto.movementType === 'withdrawal' ? -dto.amount : dto.amount;
+    const movementType = this.movementType(dto.type ?? dto.movementType);
+    const delta = this.movementDelta(movementType, dto.amount);
     const balance = new Prisma.Decimal(goal.currentAmount).plus(delta);
     if (balance.isNegative())
       throw new BadRequestException('Movement cannot leave savings below zero');
     return this.prisma.$transaction(async (tx) => {
       const movement = await tx.savingsMovement.create({
         data: {
-          ...dto,
+          amount: dto.amount,
           movementDate: new Date(dto.movementDate),
+          movementType,
+          note: dto.note,
           savingsGoalId: id,
           userId: DEFAULT_USER_ID,
         },
@@ -91,6 +95,103 @@ export class SavingsService {
       where: { savingsGoalId: id, userId: DEFAULT_USER_ID },
       orderBy: { movementDate: 'desc' },
     });
+  }
+  async updateMovement(id: string, dto: UpdateSavingsMovementDto) {
+    const movement = await this.requireMovement(id);
+    const amount = new Prisma.Decimal(dto.amount ?? movement.amount);
+    const movementType =
+      dto.type || dto.movementType
+        ? this.movementType(dto.type ?? dto.movementType)
+        : movement.movementType;
+    const balance = new Prisma.Decimal(movement.savingsGoal.currentAmount)
+      .minus(this.movementDelta(movement.movementType, movement.amount))
+      .plus(this.movementDelta(movementType, amount));
+    if (balance.isNegative())
+      throw new BadRequestException('Movement cannot leave savings below zero');
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.savingsMovement.update({
+        where: { id, userId: DEFAULT_USER_ID },
+        data: {
+          amount,
+          movementDate: dto.movementDate
+            ? new Date(dto.movementDate)
+            : undefined,
+          movementType,
+          note: dto.note,
+        },
+      });
+      await tx.savingsGoal.update({
+        where: {
+          id: movement.savingsGoalId,
+          userId: DEFAULT_USER_ID,
+        },
+        data: {
+          currentAmount: balance,
+          status: this.statusAfterBalance(
+            movement.savingsGoal.status,
+            balance,
+            movement.savingsGoal.targetAmount,
+          ),
+        },
+      });
+      return updated;
+    });
+  }
+  async removeMovement(id: string) {
+    const movement = await this.requireMovement(id);
+    const balance = new Prisma.Decimal(
+      movement.savingsGoal.currentAmount,
+    ).minus(this.movementDelta(movement.movementType, movement.amount));
+    if (balance.isNegative())
+      throw new BadRequestException('Movement cannot be safely reverted');
+    return this.prisma.$transaction(async (tx) => {
+      await tx.savingsMovement.delete({
+        where: { id, userId: DEFAULT_USER_ID },
+      });
+      await tx.savingsGoal.update({
+        where: {
+          id: movement.savingsGoalId,
+          userId: DEFAULT_USER_ID,
+        },
+        data: {
+          currentAmount: balance,
+          status: this.statusAfterBalance(
+            movement.savingsGoal.status,
+            balance,
+            movement.savingsGoal.targetAmount,
+          ),
+        },
+      });
+      return { deleted: true };
+    });
+  }
+
+  private async requireMovement(id: string) {
+    const movement = await this.prisma.savingsMovement.findFirst({
+      where: { id, userId: DEFAULT_USER_ID },
+      include: { savingsGoal: true },
+    });
+    if (!movement) throw new NotFoundException('Savings movement not found');
+    return movement;
+  }
+
+  private movementType(type?: string) {
+    if (!type) throw new BadRequestException('Movement type is required');
+    return type;
+  }
+
+  private movementDelta(type: string, amount: Prisma.Decimal.Value) {
+    const value = new Prisma.Decimal(amount);
+    return type === 'withdrawal' ? value.negated() : value;
+  }
+
+  private statusAfterBalance(
+    status: string,
+    balance: Prisma.Decimal,
+    target: Prisma.Decimal.Value,
+  ) {
+    if (balance.greaterThanOrEqualTo(target)) return 'completed';
+    return status === 'completed' ? 'active' : status;
   }
 
   private withCalculations(goal: SavingsGoal) {

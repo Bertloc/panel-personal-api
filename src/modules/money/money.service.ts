@@ -81,6 +81,7 @@ export class MoneyService {
   }
 
   getExpenses(filters: ExpenseFiltersDto) {
+    const limit = filters.limit ?? (filters.page ? 20 : undefined);
     const expenseDate =
       filters.startDate || filters.endDate
         ? {
@@ -96,7 +97,12 @@ export class MoneyService {
         expenseDate,
       },
       include: { category: true, project: true },
-      orderBy: [{ expenseDate: 'desc' }, { createdAt: 'desc' }],
+      orderBy: [
+        { expenseDate: filters.sort ?? 'desc' },
+        { createdAt: filters.sort ?? 'desc' },
+      ],
+      take: limit,
+      skip: limit && filters.page ? limit * (filters.page - 1) : undefined,
     });
   }
 
@@ -110,11 +116,13 @@ export class MoneyService {
   }
 
   async createExpense(dto: CreateExpenseDto) {
-    await this.requireCategory(dto.categoryId);
+    const category = await this.requireCategory(dto.categoryId);
+    this.requireExpenseType(category.type);
     if (dto.projectId) await this.requireProject(dto.projectId);
     return this.prisma.expense.create({
       data: {
         ...dto,
+        source: dto.source ?? 'manual',
         expenseDate: new Date(dto.expenseDate),
         userId: DEFAULT_USER_ID,
       },
@@ -124,7 +132,10 @@ export class MoneyService {
 
   async updateExpense(id: string, dto: UpdateExpenseDto) {
     await this.getExpense(id);
-    if (dto.categoryId) await this.requireCategory(dto.categoryId);
+    if (dto.categoryId) {
+      const category = await this.requireCategory(dto.categoryId);
+      this.requireExpenseType(category.type);
+    }
     if (dto.projectId) await this.requireProject(dto.projectId);
     const data: Prisma.ExpenseUpdateInput = {
       ...dto,
@@ -172,6 +183,11 @@ export class MoneyService {
       .replace(/^-|-$/g, '');
     if (!slug) throw new BadRequestException('Category name is invalid');
     return slug;
+  }
+
+  private requireExpenseType(type: string) {
+    if (type === 'income' || type === 'income_adjustment')
+      throw new BadRequestException('Category cannot be used for expenses');
   }
 
   private async requireProject(id: string) {

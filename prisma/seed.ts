@@ -42,6 +42,46 @@ async function seed() {
     },
     update: {},
   });
+  if (!(await prisma.routine.count({ where: { userId: DEFAULT_USER_ID } }))) {
+    const routines = [
+      {
+        name: 'Rutina entre semana',
+        days: [1, 2, 3, 4, 5],
+        items: ['Gym', 'Estudiar', 'Comer bien'],
+      },
+      {
+        name: 'Rutina domingo',
+        days: [0],
+        items: ['Planear semana', 'Revisar dinero'],
+      },
+    ];
+    await prisma.$transaction(async (tx) => {
+      for (const definition of routines) {
+        const routine = await tx.routine.create({
+          data: {
+            userId: DEFAULT_USER_ID,
+            name: definition.name,
+            status: 'active',
+          },
+        });
+        await tx.routineSchedule.createMany({
+          data: definition.days.map((dayOfWeek) => ({
+            userId: DEFAULT_USER_ID,
+            routineId: routine.id,
+            dayOfWeek,
+          })),
+        });
+        await tx.routineItem.createMany({
+          data: definition.items.map((title, index) => ({
+            userId: DEFAULT_USER_ID,
+            routineId: routine.id,
+            title,
+            order: index + 1,
+          })),
+        });
+      }
+    });
+  }
   const financialDataCount = await Promise.all([
     prisma.expenseCategory.count({ where: { userId: DEFAULT_USER_ID } }),
     prisma.debt.count({ where: { userId: DEFAULT_USER_ID } }),

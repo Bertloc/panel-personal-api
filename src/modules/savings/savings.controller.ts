@@ -11,6 +11,7 @@ import {
   CreateSavingsGoalDto,
   CreateSavingsMovementDto,
   UpdateSavingsGoalDto,
+  UpdateSavingsMovementDto,
 } from './savings.dto';
 import { SavingsService } from './savings.service';
 @Controller('api/savings')
@@ -42,5 +43,16 @@ export class SavingsController {
   }
   @Get('goals/:id/movements') getMovements(@Param('id') id: string) {
     return this.service.getMovements(id);
+  }
+  @Patch('movements/:movementId') updateMovement(
+    @Param('movementId') movementId: string,
+    @Body() dto: UpdateSavingsMovementDto,
+  ) {
+    return this.service.updateMovement(movementId, dto);
+  }
+  @Delete('movements/:movementId') removeMovement(
+    @Param('movementId') movementId: string,
+  ) {
+    return this.service.removeMovement(movementId);
   }
 }

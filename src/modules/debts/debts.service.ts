@@ -11,6 +11,7 @@ import {
   CreateDebtPaymentDto,
   DebtFiltersDto,
   UpdateDebtDto,
+  UpdateDebtPaymentDto,
 } from './debts.dto';
 
 @Injectable()
@@ -73,7 +74,7 @@ export class DebtsService {
     return this.withCalculations(debt);
   }
   async addPayment(id: string, dto: CreateDebtPaymentDto) {
-    const debt = await this.get(id);
+    const debt = await this.require(id);
     const balance = new Prisma.Decimal(debt.currentAmount).minus(dto.amount);
     if (balance.isNegative())
       throw new BadRequestException(
@@ -82,8 +83,10 @@ export class DebtsService {
     return this.prisma.$transaction(async (tx) => {
       const payment = await tx.debtPayment.create({
         data: {
-          ...dto,
+          amount: dto.amount,
           paymentDate: new Date(dto.paymentDate),
+          paymentType: this.paymentType(dto.type ?? dto.paymentType),
+          note: dto.note,
           debtId: id,
           userId: DEFAULT_USER_ID,
         },
@@ -103,6 +106,62 @@ export class DebtsService {
     return this.prisma.debtPayment.findMany({
       where: { debtId: id, userId: DEFAULT_USER_ID },
       orderBy: { paymentDate: 'desc' },
+    });
+  }
+  async updatePayment(id: string, dto: UpdateDebtPaymentDto) {
+    const payment = await this.requirePayment(id);
+    const amount = new Prisma.Decimal(dto.amount ?? payment.amount);
+    const balance = new Prisma.Decimal(payment.debt.currentAmount)
+      .plus(payment.amount)
+      .minus(amount);
+    if (balance.isNegative())
+      throw new BadRequestException(
+        'Payment cannot exceed current debt amount',
+      );
+    if (balance.greaterThan(payment.debt.initialAmount))
+      throw new BadRequestException('Payment cannot be safely recalculated');
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.debtPayment.update({
+        where: { id, userId: DEFAULT_USER_ID },
+        data: {
+          amount,
+          paymentDate: dto.paymentDate ? new Date(dto.paymentDate) : undefined,
+          paymentType:
+            dto.type || dto.paymentType
+              ? this.paymentType(dto.type ?? dto.paymentType)
+              : undefined,
+          note: dto.note,
+        },
+      });
+      await tx.debt.update({
+        where: { id: payment.debtId, userId: DEFAULT_USER_ID },
+        data: {
+          currentAmount: balance,
+          status: this.statusAfterBalance(payment.debt.status, balance),
+        },
+      });
+      return updated;
+    });
+  }
+  async removePayment(id: string) {
+    const payment = await this.requirePayment(id);
+    const balance = new Prisma.Decimal(payment.debt.currentAmount).plus(
+      payment.amount,
+    );
+    if (balance.greaterThan(payment.debt.initialAmount))
+      throw new BadRequestException('Payment cannot be safely reverted');
+    return this.prisma.$transaction(async (tx) => {
+      await tx.debtPayment.delete({
+        where: { id, userId: DEFAULT_USER_ID },
+      });
+      await tx.debt.update({
+        where: { id: payment.debtId, userId: DEFAULT_USER_ID },
+        data: {
+          currentAmount: balance,
+          status: this.statusAfterBalance(payment.debt.status, balance),
+        },
+      });
+      return { deleted: true };
     });
   }
   async projection(id: string) {
@@ -136,6 +195,25 @@ export class DebtsService {
     });
     if (!debt) throw new NotFoundException('Debt not found');
     return debt;
+  }
+
+  private async requirePayment(id: string) {
+    const payment = await this.prisma.debtPayment.findFirst({
+      where: { id, userId: DEFAULT_USER_ID },
+      include: { debt: true },
+    });
+    if (!payment) throw new NotFoundException('Debt payment not found');
+    return payment;
+  }
+
+  private paymentType(type?: string) {
+    if (!type) throw new BadRequestException('Payment type is required');
+    return type === 'minimum' ? 'required' : type;
+  }
+
+  private statusAfterBalance(status: string, balance: Prisma.Decimal) {
+    if (balance.isZero()) return 'paid';
+    return status === 'paid' ? 'active' : status;
   }
 
   private withCalculations(debt: Debt) {

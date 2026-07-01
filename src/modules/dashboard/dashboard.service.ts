@@ -1,9 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { DEFAULT_USER_ID, startOfUtcDay } from '../../common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { RoutinesService } from '../routines/routines.service';
 @Injectable()
 export class DashboardService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly routines: RoutinesService,
+  ) {}
   async summary() {
     const today = startOfUtcDay();
     const monthStart = new Date(
@@ -18,12 +22,14 @@ export class DashboardService {
       week,
       recentExpenses,
       categoryTotals,
-      activeDebts,
-      activeSavingsGoals,
+      debts,
+      savingsGoals,
       incomeSources,
+      recentIncomeEvents,
       currentBudget,
       upcomingPayments,
       habits,
+      routineToday,
       activeProjects,
     ] = await Promise.all([
       this.prisma.appSettings.findUnique({
@@ -54,20 +60,38 @@ export class DashboardService {
         take: 5,
       }),
       this.prisma.debt.findMany({
-        where: { userId: DEFAULT_USER_ID, status: 'active' },
+        where: {
+          userId: DEFAULT_USER_ID,
+          status: { in: ['active', 'paused', 'paid'] },
+        },
         orderBy: { createdAt: 'asc' },
       }),
       this.prisma.savingsGoal.findMany({
-        where: { userId: DEFAULT_USER_ID, status: 'active' },
+        where: {
+          userId: DEFAULT_USER_ID,
+          status: { in: ['active', 'paused', 'completed'] },
+        },
         orderBy: { createdAt: 'asc' },
       }),
       this.prisma.incomeSource.findMany({
         where: { userId: DEFAULT_USER_ID, isActive: true },
         orderBy: { createdAt: 'asc' },
       }),
+      this.prisma.incomeEvent.findMany({
+        where: { userId: DEFAULT_USER_ID },
+        include: { incomeSource: true },
+        orderBy: [{ incomeDate: 'desc' }, { createdAt: 'desc' }],
+        take: 5,
+      }),
       this.prisma.budgetPeriod.findFirst({
-        where: { userId: DEFAULT_USER_ID, status: 'active' },
-        orderBy: { createdAt: 'desc' },
+        where: {
+          userId: DEFAULT_USER_ID,
+          OR: [
+            { status: 'active' },
+            { startDate: { lte: today }, endDate: { gte: today } },
+          ],
+        },
+        orderBy: [{ status: 'asc' }, { startDate: 'desc' }],
       }),
       this.prisma.recurringObligation.findMany({
         where: { userId: DEFAULT_USER_ID, isActive: true },
@@ -80,6 +104,7 @@ export class DashboardService {
         },
         orderBy: { moment: 'asc' },
       }),
+      this.routines.getTodaySummary(),
       this.prisma.project.findMany({
         where: { userId: DEFAULT_USER_ID, status: 'active' },
         include: {
@@ -91,6 +116,10 @@ export class DashboardService {
         orderBy: { priority: 'desc' },
       }),
     ]);
+    const activeDebts = debts.filter((debt) => debt.status === 'active');
+    const activeSavingsGoals = savingsGoals.filter(
+      (goal) => goal.status === 'active',
+    );
     const categories = await this.prisma.expenseCategory.findMany({
       where: {
         userId: DEFAULT_USER_ID,
@@ -100,57 +129,102 @@ export class DashboardService {
     const categoryById = new Map(
       categories.map((category) => [category.id, category]),
     );
-    const [periodExpenses, budgetLimits] = currentBudget
-      ? await Promise.all([
-          this.prisma.expense.aggregate({
-            where: {
-              userId: DEFAULT_USER_ID,
-              expenseDate: {
-                gte: currentBudget.startDate,
-                lte: currentBudget.endDate,
-              },
-            },
-            _sum: { amount: true },
-          }),
-          this.prisma.budgetLimit.aggregate({
+    const monthEnd = new Date(
+      Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 0),
+    );
+    const periodStart = currentBudget?.startDate ?? monthStart;
+    const periodEnd = currentBudget?.endDate ?? monthEnd;
+    const [periodExpenses, budgetLimits, actualIncome] = await Promise.all([
+      this.prisma.expense.aggregate({
+        where: {
+          userId: DEFAULT_USER_ID,
+          expenseDate: { gte: periodStart, lte: periodEnd },
+        },
+        _sum: { amount: true },
+      }),
+      currentBudget
+        ? this.prisma.budgetLimit.aggregate({
             where: {
               userId: DEFAULT_USER_ID,
               budgetPeriodId: currentBudget.id,
             },
             _sum: { limitAmount: true },
-          }),
-        ])
-      : [month, null];
-    // ponytail: source amounts represent one current-period payment; normalize mixed schedules when needed.
-    const periodIncome = incomeSources.reduce(
-      (sum, source) => sum + Number(source.amount),
-      0,
-    );
+          })
+        : null,
+      this.prisma.incomeEvent.aggregate({
+        where: {
+          userId: DEFAULT_USER_ID,
+          incomeDate: { gte: periodStart, lte: periodEnd },
+        },
+        _sum: { amount: true },
+        _count: { _all: true },
+      }),
+    ]);
+    // ponytail: configured sources are the fallback estimate until real events exist in the period.
+    const periodIncomeIsEstimated = actualIncome._count._all === 0;
+    const periodIncome = periodIncomeIsEstimated
+      ? incomeSources.reduce((sum, source) => sum + Number(source.amount), 0)
+      : Number(actualIncome._sum.amount ?? 0);
     const periodSpent = Number(periodExpenses._sum.amount ?? 0);
-    const upcomingTotal = upcomingPayments.reduce(
-      (sum, payment) => sum + Number(payment.amount),
+    const upcomingTotal = upcomingPayments
+      .filter(
+        (payment) =>
+          payment.nextDueDate &&
+          payment.nextDueDate >= today &&
+          payment.nextDueDate <= periodEnd,
+      )
+      .reduce((sum, payment) => sum + Number(payment.amount), 0);
+    const totalLimit = Number(budgetLimits?._sum.limitAmount ?? 0);
+    const remainingDays = Math.max(
+      1,
+      Math.floor(
+        (periodEnd.getTime() -
+          Math.max(today.getTime(), periodStart.getTime())) /
+          86_400_000,
+      ) + 1,
+    );
+    const totalDebt = debts.reduce(
+      (sum, debt) => sum + Number(debt.currentAmount),
       0,
     );
-    const totalLimit = Number(budgetLimits?._sum.limitAmount ?? 0);
+    const totalDebtInitial = debts.reduce(
+      (sum, debt) => sum + Number(debt.initialAmount),
+      0,
+    );
+    const totalDebtPaid = Math.max(0, totalDebtInitial - totalDebt);
+    const savingsCurrent = savingsGoals.reduce(
+      (sum, goal) => sum + Number(goal.currentAmount),
+      0,
+    );
+    const savingsTarget = savingsGoals.reduce(
+      (sum, goal) => sum + Number(goal.targetAmount),
+      0,
+    );
     return {
       settings,
       onboardingCompleted: profile?.onboardingCompleted ?? false,
-      availableToday: periodIncome - periodSpent - upcomingTotal,
+      availableToday:
+        (periodIncome - periodSpent - upcomingTotal) / remainingDays,
       periodIncome,
+      periodIncomeIsEstimated,
       periodSpent,
       budgetRemaining: currentBudget ? totalLimit - periodSpent : null,
       upcomingPayments,
-      totalDebt: activeDebts.reduce(
-        (sum, debt) => sum + Number(debt.currentAmount),
-        0,
-      ),
-      totalSavingsGoal: activeSavingsGoals.reduce(
-        (sum, goal) => sum + Number(goal.targetAmount),
-        0,
-      ),
+      totalDebt,
+      totalDebtPaid,
+      debtProgressPercent: totalDebtInitial
+        ? (totalDebtPaid / totalDebtInitial) * 100
+        : 0,
+      savingsCurrent,
+      savingsTarget,
+      savingsProgressPercent: savingsTarget
+        ? (savingsCurrent / savingsTarget) * 100
+        : 0,
+      totalSavingsGoal: savingsTarget,
       currentMonthExpenses: month._sum.amount ?? 0,
       currentWeekExpenses: week._sum.amount ?? 0,
       recentExpenses,
+      recentIncomeEvents,
       topCategories: categoryTotals.map((item) => ({
         category: categoryById.get(item.categoryId),
         amount: item._sum.amount ?? 0,
@@ -161,6 +235,7 @@ export class DashboardService {
         ...habit,
         log: logs[0] ?? null,
       })),
+      routineToday,
       activeProjects: activeProjects.map(({ tasks, ...project }) => ({
         ...project,
         progress: tasks.length
