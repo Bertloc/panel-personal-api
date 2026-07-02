@@ -82,6 +82,36 @@ async function seed() {
       }
     });
   }
+  if (!(await prisma.project.count({ where: { userId: DEFAULT_USER_ID } }))) {
+    await prisma.$transaction(async (tx) => {
+      const project = await tx.project.create({
+        data: {
+          userId: DEFAULT_USER_ID,
+          name: 'Panel Personal',
+          category: 'learning',
+          priority: 'high',
+          status: 'active',
+          consumesMoney: false,
+        },
+      });
+      await tx.projectTask.createMany({
+        data: [
+          'Definir backend',
+          'Conectar frontend',
+          'Implementar rutinas',
+          'Implementar progreso',
+          'Implementar proyectos',
+        ].map((title, index) => ({
+          userId: DEFAULT_USER_ID,
+          projectId: project.id,
+          title,
+          priority: 'high',
+          status: 'pending',
+          order: index + 1,
+        })),
+      });
+    });
+  }
   const financialDataCount = await Promise.all([
     prisma.expenseCategory.count({ where: { userId: DEFAULT_USER_ID } }),
     prisma.debt.count({ where: { userId: DEFAULT_USER_ID } }),

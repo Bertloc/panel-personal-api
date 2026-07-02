@@ -2,11 +2,13 @@ import { Injectable } from '@nestjs/common';
 import { DEFAULT_USER_ID, startOfUtcDay } from '../../common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RoutinesService } from '../routines/routines.service';
+import { ProjectsService } from '../projects/projects.service';
 @Injectable()
 export class DashboardService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly routines: RoutinesService,
+    private readonly projectsService: ProjectsService,
   ) {}
   async summary() {
     const today = startOfUtcDay();
@@ -31,6 +33,7 @@ export class DashboardService {
       habits,
       routineToday,
       activeProjects,
+      projectsSummary,
     ] = await Promise.all([
       this.prisma.appSettings.findUnique({
         where: { userId: DEFAULT_USER_ID },
@@ -109,12 +112,13 @@ export class DashboardService {
         where: { userId: DEFAULT_USER_ID, status: 'active' },
         include: {
           tasks: {
-            where: { userId: DEFAULT_USER_ID },
+            where: { userId: DEFAULT_USER_ID, status: { not: 'cancelled' } },
             select: { status: true },
           },
         },
         orderBy: { priority: 'desc' },
       }),
+      this.projectsService.summary(),
     ]);
     const activeDebts = debts.filter((debt) => debt.status === 'active');
     const activeSavingsGoals = savingsGoals.filter(
@@ -240,12 +244,20 @@ export class DashboardService {
         ...project,
         progress: tasks.length
           ? Math.round(
-              (tasks.filter((task) => task.status === 'done').length /
+              (tasks.filter((task) =>
+                ['done', 'completed'].includes(task.status),
+              ).length /
                 tasks.length) *
                 100,
             )
           : 0,
       })),
+      projects: {
+        active: projectsSummary.active,
+        nearCompletion: projectsSummary.nearCompletion,
+        topProject: projectsSummary.highestProgressProject,
+        upcomingTasks: projectsSummary.upcomingTasks,
+      },
     };
   }
 }

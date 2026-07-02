@@ -448,16 +448,18 @@ model DailyProgress {
 }
 
 model Project {
-  id          String    @id @default(uuid()) @db.Uuid
-  userId      String    @map("user_id") @db.Uuid
-  name        String
-  description String?
-  status      String
-  priority    String
-  startDate   DateTime? @map("start_date") @db.Date
-  targetDate  DateTime? @map("target_date") @db.Date
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
+  id            String    @id @default(uuid()) @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  name          String
+  description   String?
+  category      String?
+  status        String
+  priority      String
+  startDate     DateTime? @map("start_date") @db.Date
+  targetDate    DateTime? @map("target_date") @db.Date
+  consumesMoney Boolean   @default(false) @map("consumes_money")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
 
   profile  Profile         @relation(fields: [userId], references: [userId])
   tasks    ProjectTask[]
@@ -466,27 +468,32 @@ model Project {
 
   @@index([userId, status])
   @@index([userId, priority])
+  @@index([userId, targetDate])
   @@map("projects")
 }
 
 model ProjectTask {
-  id          String    @id @default(uuid()) @db.Uuid
-  userId      String    @map("user_id") @db.Uuid
-  projectId   String    @map("project_id") @db.Uuid
-  title       String
-  description String?
-  status      String
-  priority    String
-  dueDate     DateTime? @map("due_date") @db.Date
-  completedAt DateTime? @map("completed_at")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
+  id            String    @id @default(uuid()) @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  projectId     String    @map("project_id") @db.Uuid
+  title         String
+  description   String?
+  status        String
+  priority      String
+  dueDate       DateTime? @map("due_date") @db.Date
+  estimatedCost Decimal?  @map("estimated_cost") @db.Decimal(12, 2)
+  actualCost    Decimal?  @map("actual_cost") @db.Decimal(12, 2)
+  order         Int       @default(0) @map("sort_order")
+  completedAt   DateTime? @map("completed_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
 
   profile Profile @relation(fields: [userId], references: [userId])
   project Project @relation(fields: [projectId], references: [id])
 
   @@index([userId, projectId])
   @@index([userId, status])
+  @@index([userId, priority])
   @@index([userId, dueDate])
   @@map("project_tasks")
 }
