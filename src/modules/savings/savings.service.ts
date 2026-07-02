@@ -4,7 +4,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma, SavingsGoal } from '@prisma/client';
-import { DEFAULT_USER_ID } from '../../common';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   CreateSavingsGoalDto,
@@ -15,35 +14,35 @@ import {
 @Injectable()
 export class SavingsService {
   constructor(private readonly prisma: PrismaService) {}
-  async getAll() {
+  async getAll(userId: string) {
     const goals = await this.prisma.savingsGoal.findMany({
-      where: { userId: DEFAULT_USER_ID },
+      where: { userId },
       orderBy: { createdAt: 'desc' },
     });
     return goals.map((goal) => this.withCalculations(goal));
   }
-  async get(id: string) {
+  async get(id: string, userId: string) {
     const goal = await this.prisma.savingsGoal.findFirst({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
     });
     if (!goal) throw new NotFoundException('Savings goal not found');
     return this.withCalculations(goal);
   }
-  async create(dto: CreateSavingsGoalDto) {
+  async create(dto: CreateSavingsGoalDto, userId: string) {
     const goal = await this.prisma.savingsGoal.create({
       data: {
         ...dto,
         targetDate: dto.targetDate ? new Date(dto.targetDate) : undefined,
         status: dto.status ?? 'active',
-        userId: DEFAULT_USER_ID,
+        userId,
       },
     });
     return this.withCalculations(goal);
   }
-  async update(id: string, dto: UpdateSavingsGoalDto) {
-    await this.get(id);
+  async update(id: string, dto: UpdateSavingsGoalDto, userId: string) {
+    await this.get(id, userId);
     const goal = await this.prisma.savingsGoal.update({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
       data: {
         ...dto,
         targetDate: dto.targetDate ? new Date(dto.targetDate) : undefined,
@@ -51,16 +50,16 @@ export class SavingsService {
     });
     return this.withCalculations(goal);
   }
-  async remove(id: string) {
-    await this.get(id);
+  async remove(id: string, userId: string) {
+    await this.get(id, userId);
     const goal = await this.prisma.savingsGoal.update({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
       data: { status: 'cancelled' },
     });
     return this.withCalculations(goal);
   }
-  async addMovement(id: string, dto: CreateSavingsMovementDto) {
-    const goal = await this.get(id);
+  async addMovement(id: string, dto: CreateSavingsMovementDto, userId: string) {
+    const goal = await this.get(id, userId);
     const movementType = this.movementType(dto.type ?? dto.movementType);
     const delta = this.movementDelta(movementType, dto.amount);
     const balance = new Prisma.Decimal(goal.currentAmount).plus(delta);
@@ -74,11 +73,11 @@ export class SavingsService {
           movementType,
           note: dto.note,
           savingsGoalId: id,
-          userId: DEFAULT_USER_ID,
+          userId,
         },
       });
       await tx.savingsGoal.update({
-        where: { id, userId: DEFAULT_USER_ID },
+        where: { id, userId },
         data: {
           currentAmount: balance,
           status: balance.greaterThanOrEqualTo(goal.targetAmount)
@@ -89,15 +88,19 @@ export class SavingsService {
       return movement;
     });
   }
-  async getMovements(id: string) {
-    await this.get(id);
+  async getMovements(id: string, userId: string) {
+    await this.get(id, userId);
     return this.prisma.savingsMovement.findMany({
-      where: { savingsGoalId: id, userId: DEFAULT_USER_ID },
+      where: { savingsGoalId: id, userId },
       orderBy: { movementDate: 'desc' },
     });
   }
-  async updateMovement(id: string, dto: UpdateSavingsMovementDto) {
-    const movement = await this.requireMovement(id);
+  async updateMovement(
+    id: string,
+    dto: UpdateSavingsMovementDto,
+    userId: string,
+  ) {
+    const movement = await this.requireMovement(id, userId);
     const amount = new Prisma.Decimal(dto.amount ?? movement.amount);
     const movementType =
       dto.type || dto.movementType
@@ -110,7 +113,7 @@ export class SavingsService {
       throw new BadRequestException('Movement cannot leave savings below zero');
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.savingsMovement.update({
-        where: { id, userId: DEFAULT_USER_ID },
+        where: { id, userId },
         data: {
           amount,
           movementDate: dto.movementDate
@@ -123,7 +126,7 @@ export class SavingsService {
       await tx.savingsGoal.update({
         where: {
           id: movement.savingsGoalId,
-          userId: DEFAULT_USER_ID,
+          userId,
         },
         data: {
           currentAmount: balance,
@@ -137,8 +140,8 @@ export class SavingsService {
       return updated;
     });
   }
-  async removeMovement(id: string) {
-    const movement = await this.requireMovement(id);
+  async removeMovement(id: string, userId: string) {
+    const movement = await this.requireMovement(id, userId);
     const balance = new Prisma.Decimal(
       movement.savingsGoal.currentAmount,
     ).minus(this.movementDelta(movement.movementType, movement.amount));
@@ -146,12 +149,12 @@ export class SavingsService {
       throw new BadRequestException('Movement cannot be safely reverted');
     return this.prisma.$transaction(async (tx) => {
       await tx.savingsMovement.delete({
-        where: { id, userId: DEFAULT_USER_ID },
+        where: { id, userId },
       });
       await tx.savingsGoal.update({
         where: {
           id: movement.savingsGoalId,
-          userId: DEFAULT_USER_ID,
+          userId,
         },
         data: {
           currentAmount: balance,
@@ -166,9 +169,9 @@ export class SavingsService {
     });
   }
 
-  private async requireMovement(id: string) {
+  private async requireMovement(id: string, userId: string) {
     const movement = await this.prisma.savingsMovement.findFirst({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
       include: { savingsGoal: true },
     });
     if (!movement) throw new NotFoundException('Savings movement not found');

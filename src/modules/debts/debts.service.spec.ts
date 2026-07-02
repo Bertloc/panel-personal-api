@@ -32,7 +32,7 @@ describe('DebtsService', () => {
       $transaction: transaction,
     } as unknown as PrismaService;
 
-    await new DebtsService(prisma).removePayment('payment-id');
+    await new DebtsService(prisma).removePayment('payment-id', 'user-id');
 
     expect(updatedBalance?.toNumber()).toBe(100);
   });

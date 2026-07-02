@@ -1,5 +1,4 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { DEFAULT_USER_ID } from '../../common';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   CreateRecurringPaymentDto,
@@ -11,10 +10,10 @@ import {
 export class RecurringPaymentsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  getAll(filters: RecurringPaymentFiltersDto) {
+  getAll(filters: RecurringPaymentFiltersDto, userId: string) {
     return this.prisma.recurringObligation.findMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
         isActive: filters.includeInactive ? undefined : true,
       },
       include: { category: true },
@@ -22,23 +21,23 @@ export class RecurringPaymentsService {
     });
   }
 
-  async create(dto: CreateRecurringPaymentDto) {
-    if (dto.categoryId) await this.requireCategory(dto.categoryId);
+  async create(dto: CreateRecurringPaymentDto, userId: string) {
+    if (dto.categoryId) await this.requireCategory(dto.categoryId, userId);
     return this.prisma.recurringObligation.create({
       data: {
         ...dto,
         nextDueDate: dto.nextDueDate ? new Date(dto.nextDueDate) : undefined,
-        userId: DEFAULT_USER_ID,
+        userId,
       },
       include: { category: true },
     });
   }
 
-  async update(id: string, dto: UpdateRecurringPaymentDto) {
-    await this.require(id);
-    if (dto.categoryId) await this.requireCategory(dto.categoryId);
+  async update(id: string, dto: UpdateRecurringPaymentDto, userId: string) {
+    await this.require(id, userId);
+    if (dto.categoryId) await this.requireCategory(dto.categoryId, userId);
     return this.prisma.recurringObligation.update({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
       data: {
         ...dto,
         nextDueDate: dto.nextDueDate ? new Date(dto.nextDueDate) : undefined,
@@ -47,25 +46,25 @@ export class RecurringPaymentsService {
     });
   }
 
-  async remove(id: string) {
-    await this.require(id);
+  async remove(id: string, userId: string) {
+    await this.require(id, userId);
     return this.prisma.recurringObligation.update({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
       data: { isActive: false },
     });
   }
 
-  private async require(id: string) {
+  private async require(id: string, userId: string) {
     const payment = await this.prisma.recurringObligation.findFirst({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
     });
     if (!payment) throw new NotFoundException('Recurring payment not found');
     return payment;
   }
 
-  private async requireCategory(id: string) {
+  private async requireCategory(id: string, userId: string) {
     const category = await this.prisma.expenseCategory.findFirst({
-      where: { id, userId: DEFAULT_USER_ID, isActive: true },
+      where: { id, userId, isActive: true },
     });
     if (!category) throw new NotFoundException('Expense category not found');
   }

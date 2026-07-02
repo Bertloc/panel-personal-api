@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { DEFAULT_USER_ID, startOfUtcDay } from '../../common';
+import { startOfUtcDay } from '../../common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RoutinesService } from '../routines/routines.service';
 import { ProjectsService } from '../projects/projects.service';
@@ -10,7 +10,7 @@ export class DashboardService {
     private readonly routines: RoutinesService,
     private readonly projectsService: ProjectsService,
   ) {}
-  async summary() {
+  async summary(userId: string) {
     const today = startOfUtcDay();
     const monthStart = new Date(
       Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1),
@@ -36,59 +36,59 @@ export class DashboardService {
       projectsSummary,
     ] = await Promise.all([
       this.prisma.appSettings.findUnique({
-        where: { userId: DEFAULT_USER_ID },
+        where: { userId },
       }),
       this.prisma.profile.findUnique({
-        where: { userId: DEFAULT_USER_ID },
+        where: { userId },
       }),
       this.prisma.expense.aggregate({
-        where: { userId: DEFAULT_USER_ID, expenseDate: { gte: monthStart } },
+        where: { userId, expenseDate: { gte: monthStart } },
         _sum: { amount: true },
       }),
       this.prisma.expense.aggregate({
-        where: { userId: DEFAULT_USER_ID, expenseDate: { gte: weekStart } },
+        where: { userId, expenseDate: { gte: weekStart } },
         _sum: { amount: true },
       }),
       this.prisma.expense.findMany({
-        where: { userId: DEFAULT_USER_ID },
+        where: { userId },
         include: { category: true },
         orderBy: [{ expenseDate: 'desc' }, { createdAt: 'desc' }],
         take: 5,
       }),
       this.prisma.expense.groupBy({
         by: ['categoryId'],
-        where: { userId: DEFAULT_USER_ID, expenseDate: { gte: monthStart } },
+        where: { userId, expenseDate: { gte: monthStart } },
         _sum: { amount: true },
         orderBy: { _sum: { amount: 'desc' } },
         take: 5,
       }),
       this.prisma.debt.findMany({
         where: {
-          userId: DEFAULT_USER_ID,
+          userId,
           status: { in: ['active', 'paused', 'paid'] },
         },
         orderBy: { createdAt: 'asc' },
       }),
       this.prisma.savingsGoal.findMany({
         where: {
-          userId: DEFAULT_USER_ID,
+          userId,
           status: { in: ['active', 'paused', 'completed'] },
         },
         orderBy: { createdAt: 'asc' },
       }),
       this.prisma.incomeSource.findMany({
-        where: { userId: DEFAULT_USER_ID, isActive: true },
+        where: { userId, isActive: true },
         orderBy: { createdAt: 'asc' },
       }),
       this.prisma.incomeEvent.findMany({
-        where: { userId: DEFAULT_USER_ID },
+        where: { userId },
         include: { incomeSource: true },
         orderBy: [{ incomeDate: 'desc' }, { createdAt: 'desc' }],
         take: 5,
       }),
       this.prisma.budgetPeriod.findFirst({
         where: {
-          userId: DEFAULT_USER_ID,
+          userId,
           OR: [
             { status: 'active' },
             { startDate: { lte: today }, endDate: { gte: today } },
@@ -97,28 +97,28 @@ export class DashboardService {
         orderBy: [{ status: 'asc' }, { startDate: 'desc' }],
       }),
       this.prisma.recurringObligation.findMany({
-        where: { userId: DEFAULT_USER_ID, isActive: true },
+        where: { userId, isActive: true },
         orderBy: [{ nextDueDate: 'asc' }, { createdAt: 'asc' }],
       }),
       this.prisma.habit.findMany({
-        where: { userId: DEFAULT_USER_ID, isActive: true },
+        where: { userId, isActive: true },
         include: {
-          logs: { where: { userId: DEFAULT_USER_ID, logDate: today }, take: 1 },
+          logs: { where: { userId, logDate: today }, take: 1 },
         },
         orderBy: { moment: 'asc' },
       }),
-      this.routines.getTodaySummary(),
+      this.routines.getTodaySummary(userId),
       this.prisma.project.findMany({
-        where: { userId: DEFAULT_USER_ID, status: 'active' },
+        where: { userId, status: 'active' },
         include: {
           tasks: {
-            where: { userId: DEFAULT_USER_ID, status: { not: 'cancelled' } },
+            where: { userId, status: { not: 'cancelled' } },
             select: { status: true },
           },
         },
         orderBy: { priority: 'desc' },
       }),
-      this.projectsService.summary(),
+      this.projectsService.summary(userId),
     ]);
     const activeDebts = debts.filter((debt) => debt.status === 'active');
     const activeSavingsGoals = savingsGoals.filter(
@@ -126,7 +126,7 @@ export class DashboardService {
     );
     const categories = await this.prisma.expenseCategory.findMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
         id: { in: categoryTotals.map((item) => item.categoryId) },
       },
     });
@@ -141,7 +141,7 @@ export class DashboardService {
     const [periodExpenses, budgetLimits, actualIncome] = await Promise.all([
       this.prisma.expense.aggregate({
         where: {
-          userId: DEFAULT_USER_ID,
+          userId,
           expenseDate: { gte: periodStart, lte: periodEnd },
         },
         _sum: { amount: true },
@@ -149,7 +149,7 @@ export class DashboardService {
       currentBudget
         ? this.prisma.budgetLimit.aggregate({
             where: {
-              userId: DEFAULT_USER_ID,
+              userId,
               budgetPeriodId: currentBudget.id,
             },
             _sum: { limitAmount: true },
@@ -157,7 +157,7 @@ export class DashboardService {
         : null,
       this.prisma.incomeEvent.aggregate({
         where: {
-          userId: DEFAULT_USER_ID,
+          userId,
           incomeDate: { gte: periodStart, lte: periodEnd },
         },
         _sum: { amount: true },

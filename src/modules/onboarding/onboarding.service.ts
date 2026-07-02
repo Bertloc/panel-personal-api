@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import { DEFAULT_USER_ID } from '../../common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CompleteOnboardingDto } from './onboarding.dto';
 
@@ -7,18 +6,18 @@ import { CompleteOnboardingDto } from './onboarding.dto';
 export class OnboardingService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getStatus() {
+  async getStatus(userId: string) {
     const profile = await this.prisma.profile.upsert({
-      where: { userId: DEFAULT_USER_ID },
-      create: { userId: DEFAULT_USER_ID, displayName: 'Personal Profile' },
+      where: { userId },
+      create: { userId, displayName: 'Personal Profile' },
       update: {},
     });
     const [settings, incomeSources] = await Promise.all([
       this.prisma.appSettings.findUnique({
-        where: { userId: DEFAULT_USER_ID },
+        where: { userId },
       }),
       this.prisma.incomeSource.findMany({
-        where: { userId: DEFAULT_USER_ID, isActive: true },
+        where: { userId, isActive: true },
         orderBy: { createdAt: 'asc' },
       }),
     ]);
@@ -30,14 +29,14 @@ export class OnboardingService {
     };
   }
 
-  complete(dto: CompleteOnboardingDto) {
+  complete(dto: CompleteOnboardingDto, userId: string) {
     return this.prisma.$transaction(async (tx) => {
       const completedAt = new Date();
       const profile = await tx.profile.upsert({
-        where: { userId: DEFAULT_USER_ID },
+        where: { userId },
         create: {
           ...dto.profile,
-          userId: DEFAULT_USER_ID,
+          userId,
           onboardingCompleted: true,
           onboardingCompletedAt: completedAt,
         },
@@ -48,9 +47,9 @@ export class OnboardingService {
         },
       });
       const settings = await tx.appSettings.upsert({
-        where: { userId: DEFAULT_USER_ID },
+        where: { userId },
         create: {
-          userId: DEFAULT_USER_ID,
+          userId,
           currency: dto.profile.currency,
           incomeFrequency: dto.income.frequency,
           budgetMode: dto.settings.budgetMode,
@@ -64,7 +63,7 @@ export class OnboardingService {
         },
       });
       const currentIncome = await tx.incomeSource.findFirst({
-        where: { userId: DEFAULT_USER_ID, isActive: true },
+        where: { userId, isActive: true },
         orderBy: { createdAt: 'asc' },
       });
       const incomeData = {
@@ -76,16 +75,16 @@ export class OnboardingService {
       };
       if (currentIncome) {
         await tx.incomeSource.update({
-          where: { id: currentIncome.id, userId: DEFAULT_USER_ID },
+          where: { id: currentIncome.id, userId },
           data: incomeData,
         });
       } else {
         await tx.incomeSource.create({
-          data: { ...incomeData, userId: DEFAULT_USER_ID },
+          data: { ...incomeData, userId },
         });
       }
       const incomeSources = await tx.incomeSource.findMany({
-        where: { userId: DEFAULT_USER_ID, isActive: true },
+        where: { userId, isActive: true },
         orderBy: { createdAt: 'asc' },
       });
       return { completed: true, profile, settings, incomeSources };

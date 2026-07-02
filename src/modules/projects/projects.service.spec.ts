@@ -40,12 +40,14 @@ describe('ProjectsService', () => {
         budgets: [{ plannedAmount: 100, spentAmount: 10 }],
       },
     ];
-    const prisma = {
-      project: { findMany: jest.fn().mockResolvedValue(projects) },
-    } as unknown as PrismaService;
+    const findMany = jest.fn().mockResolvedValue(projects);
+    const prisma = { project: { findMany } } as unknown as PrismaService;
 
-    const result = await new ProjectsService(prisma).summary();
+    const result = await new ProjectsService(prisma).summary('user-id');
 
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { userId: 'user-id' } }),
+    );
     expect(result).toMatchObject({
       active: 1,
       nearCompletion: 0,

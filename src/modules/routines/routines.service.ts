@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { DEFAULT_USER_ID, nextUtcDay, startOfUtcDay } from '../../common';
+import { nextUtcDay, startOfUtcDay } from '../../common';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   CreateRoutineDto,
@@ -23,10 +23,10 @@ import {
 export class RoutinesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getAll(query: RoutineQueryDto) {
+  async getAll(query: RoutineQueryDto, userId: string) {
     const routines = await this.prisma.routine.findMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
         status:
           query.status ??
           (query.includeArchived ? undefined : { not: 'archived' }),
@@ -48,21 +48,21 @@ export class RoutinesService {
     }));
   }
 
-  async create(dto: CreateRoutineDto) {
+  async create(dto: CreateRoutineDto, userId: string) {
     const { daysOfWeek, ...data } = dto;
     return this.prisma.$transaction(async (tx) => {
       const routine = await tx.routine.create({
-        data: { ...data, userId: DEFAULT_USER_ID },
+        data: { ...data, userId },
       });
       if (daysOfWeek)
-        await this.syncSchedules(tx, routine.id, null, daysOfWeek);
+        await this.syncSchedules(tx, routine.id, null, daysOfWeek, userId);
       return routine;
     });
   }
 
-  async get(id: string) {
+  async get(id: string, userId: string) {
     const routine = await this.prisma.routine.findFirst({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
       include: {
         items: { orderBy: [{ order: 'asc' }, { createdAt: 'asc' }] },
         schedules: { orderBy: { dayOfWeek: 'asc' } },
@@ -72,116 +72,121 @@ export class RoutinesService {
     return routine;
   }
 
-  async update(id: string, dto: UpdateRoutineDto) {
-    await this.requireRoutine(id);
+  async update(id: string, dto: UpdateRoutineDto, userId: string) {
+    await this.requireRoutine(id, userId);
     const { daysOfWeek, ...data } = dto;
     return this.prisma.$transaction(async (tx) => {
       const routine = await tx.routine.update({
-        where: { id, userId: DEFAULT_USER_ID },
+        where: { id, userId },
         data,
       });
-      if (daysOfWeek) await this.syncSchedules(tx, id, null, daysOfWeek);
+      if (daysOfWeek)
+        await this.syncSchedules(tx, id, null, daysOfWeek, userId);
       return routine;
     });
   }
 
-  async remove(id: string) {
-    await this.requireRoutine(id);
+  async remove(id: string, userId: string) {
+    await this.requireRoutine(id, userId);
     return this.prisma.routine.update({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
       data: { status: 'archived' },
     });
   }
 
-  async getItems(routineId: string) {
-    await this.requireRoutine(routineId);
+  async getItems(routineId: string, userId: string) {
+    await this.requireRoutine(routineId, userId);
     return this.prisma.routineItem.findMany({
-      where: { userId: DEFAULT_USER_ID, routineId },
+      where: { userId, routineId },
       include: { schedules: { orderBy: { dayOfWeek: 'asc' } } },
       orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
     });
   }
 
-  async createItem(routineId: string, dto: CreateRoutineItemDto) {
-    await this.requireRoutine(routineId);
+  async createItem(
+    routineId: string,
+    dto: CreateRoutineItemDto,
+    userId: string,
+  ) {
+    await this.requireRoutine(routineId, userId);
     const { daysOfWeek, ...data } = dto;
     return this.prisma.$transaction(async (tx) => {
       const item = await tx.routineItem.create({
-        data: { ...data, routineId, userId: DEFAULT_USER_ID },
+        data: { ...data, routineId, userId },
       });
       if (daysOfWeek)
-        await this.syncSchedules(tx, routineId, item.id, daysOfWeek);
+        await this.syncSchedules(tx, routineId, item.id, daysOfWeek, userId);
       return item;
     });
   }
 
-  async updateItem(id: string, dto: UpdateRoutineItemDto) {
-    const item = await this.requireItem(id);
+  async updateItem(id: string, dto: UpdateRoutineItemDto, userId: string) {
+    const item = await this.requireItem(id, userId);
     const { daysOfWeek, ...data } = dto;
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.routineItem.update({
-        where: { id, userId: DEFAULT_USER_ID },
+        where: { id, userId },
         data,
       });
       if (daysOfWeek)
-        await this.syncSchedules(tx, item.routineId, id, daysOfWeek);
+        await this.syncSchedules(tx, item.routineId, id, daysOfWeek, userId);
       return updated;
     });
   }
 
-  async removeItem(id: string) {
-    await this.requireItem(id);
+  async removeItem(id: string, userId: string) {
+    await this.requireItem(id, userId);
     return this.prisma.routineItem.update({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
       data: { isActive: false },
     });
   }
 
-  async getToday(query: RoutineTodayQueryDto) {
-    const date = await this.resolveDate(query.date);
-    const routines = await this.loadRoutines(date, date);
+  async getToday(query: RoutineTodayQueryDto, userId: string) {
+    const date = await this.resolveDate(query.date, userId);
+    const routines = await this.loadRoutines(date, date, userId);
     return this.dayResult(date, routines);
   }
 
-  async getTodaySummary() {
-    return (await this.getToday({})).summary;
+  async getTodaySummary(userId: string) {
+    return (await this.getToday({}, userId)).summary;
   }
 
-  async createLog(dto: CreateRoutineLogDto) {
-    const item = await this.requireItem(dto.routineItemId);
+  async createLog(dto: CreateRoutineLogDto, userId: string) {
+    const item = await this.requireItem(dto.routineItemId, userId);
     if (item.routineId !== dto.routineId)
       throw new BadRequestException('Routine item does not belong to routine');
     const logDate = this.parseDate(dto.logDate);
     return this.prisma.routineLog.upsert({
       where: {
         userId_routineItemId_logDate: {
-          userId: DEFAULT_USER_ID,
+          userId,
           routineItemId: dto.routineItemId,
           logDate,
         },
       },
-      create: { ...dto, logDate, userId: DEFAULT_USER_ID },
+      create: { ...dto, logDate, userId },
       update: { status: dto.status, note: dto.note, routineId: dto.routineId },
     });
   }
 
-  async updateLog(id: string, dto: UpdateRoutineLogDto) {
-    await this.requireLog(id);
+  async updateLog(id: string, dto: UpdateRoutineLogDto, userId: string) {
+    await this.requireLog(id, userId);
     return this.prisma.routineLog.update({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
       data: dto,
     });
   }
 
-  async removeLog(id: string) {
-    await this.requireLog(id);
+  async removeLog(id: string, userId: string) {
+    await this.requireLog(id, userId);
     return this.prisma.routineLog.delete({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
     });
   }
 
-  async history(query: RoutineHistoryQueryDto) {
-    const endDate = await this.resolveDate(query.endDate);
+  async history(query: RoutineHistoryQueryDto, userId: string) {
+    const endDate = await this.resolveDate(query.endDate, userId);
     const startDate = query.startDate
       ? this.parseDate(query.startDate)
       : new Date(Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth(), 1));
@@ -191,32 +196,32 @@ export class RoutinesService {
       );
     if ((endDate.getTime() - startDate.getTime()) / 86_400_000 > 366)
       throw new BadRequestException('History range cannot exceed 366 days');
-    if (query.routineId) await this.requireRoutine(query.routineId);
+    if (query.routineId) await this.requireRoutine(query.routineId, userId);
     return {
       startDate: this.dateString(startDate),
       endDate: this.dateString(endDate),
-      days: await this.historyDays(startDate, endDate, query.routineId),
+      days: await this.historyDays(startDate, endDate, userId, query.routineId),
     };
   }
 
-  async summary(query: RoutineSummaryQueryDto) {
-    const date = await this.resolveDate(query.date);
-    const today = (await this.getToday({ date: this.dateString(date) }))
+  async summary(query: RoutineSummaryQueryDto, userId: string) {
+    const date = await this.resolveDate(query.date, userId);
+    const today = (await this.getToday({ date: this.dateString(date) }, userId))
       .summary;
     const weekStart = new Date(date);
     weekStart.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7));
     const weekEnd = new Date(weekStart);
     weekEnd.setUTCDate(weekStart.getUTCDate() + 6);
-    const weekDays = await this.historyDays(weekStart, weekEnd);
+    const weekDays = await this.historyDays(weekStart, weekEnd, userId);
     const activeWeekDays = weekDays.filter((day) => day.total > 0);
     const completedDays = activeWeekDays.filter(
       (day) => day.completionPercent >= 80,
     ).length;
     const streakStart = new Date(date);
     streakStart.setUTCDate(date.getUTCDate() - 364);
-    const streakDays = (await this.historyDays(streakStart, date)).filter(
-      (day) => day.total > 0,
-    );
+    const streakDays = (
+      await this.historyDays(streakStart, date, userId)
+    ).filter((day) => day.total > 0);
     let current = 0;
     for (let index = streakDays.length - 1; index >= 0; index--) {
       if (streakDays[index].completionPercent < 80) break;
@@ -244,10 +249,16 @@ export class RoutinesService {
   private async historyDays(
     startDate: Date,
     endDate: Date,
+    userId: string,
     routineId?: string,
   ) {
     // ponytail: history uses current schedules; add effective dates if edits must preserve past expectations.
-    const routines = await this.loadRoutines(startDate, endDate, routineId);
+    const routines = await this.loadRoutines(
+      startDate,
+      endDate,
+      userId,
+      routineId,
+    );
     const days: ({ date: string } & ReturnType<
       RoutinesService['summarize']
     >)[] = [];
@@ -262,17 +273,22 @@ export class RoutinesService {
     return days;
   }
 
-  private loadRoutines(startDate: Date, endDate: Date, routineId?: string) {
+  private loadRoutines(
+    startDate: Date,
+    endDate: Date,
+    userId: string,
+    routineId?: string,
+  ) {
     return this.prisma.routine.findMany({
-      where: { id: routineId, userId: DEFAULT_USER_ID, status: 'active' },
+      where: { id: routineId, userId, status: 'active' },
       include: {
-        schedules: { where: { userId: DEFAULT_USER_ID } },
+        schedules: { where: { userId } },
         items: {
-          where: { userId: DEFAULT_USER_ID, isActive: true },
+          where: { userId, isActive: true },
           include: {
             logs: {
               where: {
-                userId: DEFAULT_USER_ID,
+                userId,
                 logDate: { gte: startDate, lte: endDate },
               },
             },
@@ -362,9 +378,10 @@ export class RoutinesService {
     routineId: string,
     routineItemId: string | null,
     daysOfWeek: number[],
+    userId: string,
   ) {
     const schedules = await tx.routineSchedule.findMany({
-      where: { userId: DEFAULT_USER_ID, routineId, routineItemId },
+      where: { userId, routineId, routineItemId },
       orderBy: { createdAt: 'asc' },
     });
     const enabled = new Set<number>();
@@ -382,7 +399,7 @@ export class RoutinesService {
       if (enabled.has(dayOfWeek)) continue;
       await tx.routineSchedule.create({
         data: {
-          userId: DEFAULT_USER_ID,
+          userId,
           routineId,
           routineItemId,
           dayOfWeek,
@@ -391,10 +408,10 @@ export class RoutinesService {
     }
   }
 
-  private async resolveDate(input?: string) {
+  private async resolveDate(input: string | undefined, userId: string) {
     if (input) return this.parseDate(input);
     const profile = await this.prisma.profile.findUnique({
-      where: { userId: DEFAULT_USER_ID },
+      where: { userId },
       select: { timezone: true },
     });
     try {
@@ -421,25 +438,25 @@ export class RoutinesService {
     return value.toISOString().slice(0, 10);
   }
 
-  private async requireRoutine(id: string) {
+  private async requireRoutine(id: string, userId: string) {
     const routine = await this.prisma.routine.findFirst({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
     });
     if (!routine) throw new NotFoundException('Routine not found');
     return routine;
   }
 
-  private async requireItem(id: string) {
+  private async requireItem(id: string, userId: string) {
     const item = await this.prisma.routineItem.findFirst({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
     });
     if (!item) throw new NotFoundException('Routine item not found');
     return item;
   }
 
-  private async requireLog(id: string) {
+  private async requireLog(id: string, userId: string) {
     const log = await this.prisma.routineLog.findFirst({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
     });
     if (!log) throw new NotFoundException('Routine log not found');
     return log;

@@ -45,9 +45,12 @@ describe('RoutinesService', () => {
       },
     } as unknown as PrismaService;
 
-    const result = await new RoutinesService(prisma).getToday({
-      date: '2026-07-15',
-    });
+    const result = await new RoutinesService(prisma).getToday(
+      {
+        date: '2026-07-15',
+      },
+      'user-id',
+    );
 
     expect(result.items.map((item) => item.status)).toEqual([
       'done',

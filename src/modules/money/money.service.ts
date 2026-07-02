@@ -5,7 +5,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { DEFAULT_USER_ID } from '../../common';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   CategoryFiltersDto,
@@ -20,10 +19,10 @@ import {
 export class MoneyService {
   constructor(private readonly prisma: PrismaService) {}
 
-  getCategories(filters: CategoryFiltersDto) {
+  getCategories(filters: CategoryFiltersDto, userId: string) {
     return this.prisma.expenseCategory.findMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
         type: filters.type,
         isActive: filters.includeInactive ? undefined : true,
       },
@@ -31,10 +30,10 @@ export class MoneyService {
     });
   }
 
-  async createCategory(dto: CreateExpenseCategoryDto) {
+  async createCategory(dto: CreateExpenseCategoryDto, userId: string) {
     const slug = this.toSlug(dto.name);
     const exists = await this.prisma.expenseCategory.findUnique({
-      where: { userId_slug: { userId: DEFAULT_USER_ID, slug } },
+      where: { userId_slug: { userId, slug } },
     });
     if (exists?.isActive)
       throw new ConflictException('Category slug already exists');
@@ -42,16 +41,20 @@ export class MoneyService {
     delete data.slug;
     if (exists)
       return this.prisma.expenseCategory.update({
-        where: { id: exists.id, userId: DEFAULT_USER_ID },
+        where: { id: exists.id, userId },
         data: { ...data, slug, isActive: true },
       });
     return this.prisma.expenseCategory.create({
-      data: { ...data, slug, userId: DEFAULT_USER_ID },
+      data: { ...data, slug, userId },
     });
   }
 
-  async updateCategory(id: string, dto: UpdateExpenseCategoryDto) {
-    await this.requireCategory(id, false);
+  async updateCategory(
+    id: string,
+    dto: UpdateExpenseCategoryDto,
+    userId: string,
+  ) {
+    await this.requireCategory(id, userId, false);
     const slug = dto.name
       ? this.toSlug(dto.name)
       : dto.slug
@@ -59,7 +62,7 @@ export class MoneyService {
         : undefined;
     if (slug) {
       const duplicate = await this.prisma.expenseCategory.findFirst({
-        where: { userId: DEFAULT_USER_ID, slug, NOT: { id } },
+        where: { userId, slug, NOT: { id } },
       });
       if (duplicate)
         throw new ConflictException('Category slug already exists');
@@ -67,20 +70,20 @@ export class MoneyService {
     const data = { ...dto };
     delete data.slug;
     return this.prisma.expenseCategory.update({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
       data: { ...data, slug },
     });
   }
 
-  async deleteCategory(id: string) {
-    await this.requireCategory(id, false);
+  async deleteCategory(id: string, userId: string) {
+    await this.requireCategory(id, userId, false);
     return this.prisma.expenseCategory.update({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
       data: { isActive: false },
     });
   }
 
-  getExpenses(filters: ExpenseFiltersDto) {
+  getExpenses(filters: ExpenseFiltersDto, userId: string) {
     const limit = filters.limit ?? (filters.page ? 20 : undefined);
     const expenseDate =
       filters.startDate || filters.endDate
@@ -91,7 +94,7 @@ export class MoneyService {
         : undefined;
     return this.prisma.expense.findMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
         categoryId: filters.categoryId,
         source: filters.source,
         expenseDate,
@@ -106,37 +109,37 @@ export class MoneyService {
     });
   }
 
-  async getExpense(id: string) {
+  async getExpense(id: string, userId: string) {
     const expense = await this.prisma.expense.findFirst({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
       include: { category: true, project: true },
     });
     if (!expense) throw new NotFoundException('Expense not found');
     return expense;
   }
 
-  async createExpense(dto: CreateExpenseDto) {
-    const category = await this.requireCategory(dto.categoryId);
+  async createExpense(dto: CreateExpenseDto, userId: string) {
+    const category = await this.requireCategory(dto.categoryId, userId);
     this.requireExpenseType(category.type);
-    if (dto.projectId) await this.requireProject(dto.projectId);
+    if (dto.projectId) await this.requireProject(dto.projectId, userId);
     return this.prisma.expense.create({
       data: {
         ...dto,
         source: dto.source ?? 'manual',
         expenseDate: new Date(dto.expenseDate),
-        userId: DEFAULT_USER_ID,
+        userId,
       },
       include: { category: true, project: true },
     });
   }
 
-  async updateExpense(id: string, dto: UpdateExpenseDto) {
-    await this.getExpense(id);
+  async updateExpense(id: string, dto: UpdateExpenseDto, userId: string) {
+    await this.getExpense(id, userId);
     if (dto.categoryId) {
-      const category = await this.requireCategory(dto.categoryId);
+      const category = await this.requireCategory(dto.categoryId, userId);
       this.requireExpenseType(category.type);
     }
-    if (dto.projectId) await this.requireProject(dto.projectId);
+    if (dto.projectId) await this.requireProject(dto.projectId, userId);
     const data: Prisma.ExpenseUpdateInput = {
       ...dto,
       expenseDate: dto.expenseDate ? new Date(dto.expenseDate) : undefined,
@@ -148,24 +151,24 @@ export class MoneyService {
     delete (data as Record<string, unknown>).categoryId;
     delete (data as Record<string, unknown>).projectId;
     return this.prisma.expense.update({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
       data,
       include: { category: true, project: true },
     });
   }
 
-  async deleteExpense(id: string) {
-    await this.getExpense(id);
+  async deleteExpense(id: string, userId: string) {
+    await this.getExpense(id, userId);
     return this.prisma.expense.delete({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
     });
   }
 
-  private async requireCategory(id: string, activeOnly = true) {
+  private async requireCategory(id: string, userId: string, activeOnly = true) {
     const category = await this.prisma.expenseCategory.findFirst({
       where: {
         id,
-        userId: DEFAULT_USER_ID,
+        userId,
         isActive: activeOnly ? true : undefined,
       },
     });
@@ -190,9 +193,9 @@ export class MoneyService {
       throw new BadRequestException('Category cannot be used for expenses');
   }
 
-  private async requireProject(id: string) {
+  private async requireProject(id: string, userId: string) {
     const project = await this.prisma.project.findFirst({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
     });
     if (!project) throw new NotFoundException('Project not found');
   }

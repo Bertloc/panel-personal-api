@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { BudgetPeriod } from '@prisma/client';
-import { DEFAULT_USER_ID, startOfUtcDay } from '../../common';
+import { startOfUtcDay } from '../../common';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   CreateBudgetLimitDto,
@@ -19,11 +19,11 @@ import {
 export class BudgetsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getCurrent() {
+  async getCurrent(userId: string) {
     const today = startOfUtcDay();
     const period = await this.prisma.budgetPeriod.findFirst({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
         OR: [
           { status: 'active' },
           { startDate: { lte: today }, endDate: { gte: today } },
@@ -32,19 +32,19 @@ export class BudgetsService {
       orderBy: [{ status: 'asc' }, { startDate: 'desc' }],
     });
     if (!period) return { current: null, limits: [], summary: null };
-    return this.withUsage(period);
+    return this.withUsage(period, userId);
   }
 
-  async createCurrent(dto: CreateCurrentBudgetDto) {
-    await this.validateCurrent(dto);
+  async createCurrent(dto: CreateCurrentBudgetDto, userId: string) {
+    await this.validateCurrent(dto, userId);
     await this.prisma.$transaction(async (tx) => {
       const current = await tx.budgetPeriod.findFirst({
-        where: { userId: DEFAULT_USER_ID, status: 'active' },
+        where: { userId, status: 'active' },
         orderBy: { createdAt: 'desc' },
       });
       const period = current
         ? await tx.budgetPeriod.update({
-            where: { id: current.id, userId: DEFAULT_USER_ID },
+            where: { id: current.id, userId },
             data: {
               name: dto.name,
               periodType: dto.periodType,
@@ -54,7 +54,7 @@ export class BudgetsService {
           })
         : await tx.budgetPeriod.create({
             data: {
-              userId: DEFAULT_USER_ID,
+              userId,
               name: dto.name,
               periodType: dto.periodType,
               startDate: new Date(dto.startDate),
@@ -64,65 +64,68 @@ export class BudgetsService {
           });
       await tx.budgetPeriod.updateMany({
         where: {
-          userId: DEFAULT_USER_ID,
+          userId,
           status: 'active',
           NOT: { id: period.id },
         },
         data: { status: 'closed' },
       });
       await tx.budgetLimit.deleteMany({
-        where: { userId: DEFAULT_USER_ID, budgetPeriodId: period.id },
+        where: { userId, budgetPeriodId: period.id },
       });
       if (dto.limits.length)
         await tx.budgetLimit.createMany({
           data: dto.limits.map((limit) => ({
-            userId: DEFAULT_USER_ID,
+            userId,
             budgetPeriodId: period.id,
             categoryId: limit.categoryId,
             limitAmount: limit.amount,
           })),
         });
     });
-    return this.getCurrent();
+    return this.getCurrent(userId);
   }
 
-  async updateCurrent(dto: UpdateCurrentBudgetDto) {
+  async updateCurrent(dto: UpdateCurrentBudgetDto, userId: string) {
     const current = await this.prisma.budgetPeriod.findFirst({
-      where: { userId: DEFAULT_USER_ID, status: 'active' },
+      where: { userId, status: 'active' },
       include: { limits: true },
       orderBy: { createdAt: 'desc' },
     });
     if (!current) throw new NotFoundException('Current budget not found');
-    return this.createCurrent({
-      name: dto.name ?? current.name,
-      periodType: dto.periodType ?? current.periodType,
-      startDate: dto.startDate ?? current.startDate.toISOString(),
-      endDate: dto.endDate ?? current.endDate.toISOString(),
-      limits:
-        dto.limits ??
-        current.limits.map((limit) => ({
-          categoryId: limit.categoryId,
-          amount: Number(limit.limitAmount),
-        })),
-    });
+    return this.createCurrent(
+      {
+        name: dto.name ?? current.name,
+        periodType: dto.periodType ?? current.periodType,
+        startDate: dto.startDate ?? current.startDate.toISOString(),
+        endDate: dto.endDate ?? current.endDate.toISOString(),
+        limits:
+          dto.limits ??
+          current.limits.map((limit) => ({
+            categoryId: limit.categoryId,
+            amount: Number(limit.limitAmount),
+          })),
+      },
+      userId,
+    );
   }
 
-  getPeriods() {
+  getPeriods(userId: string) {
     return this.prisma.budgetPeriod.findMany({
-      where: { userId: DEFAULT_USER_ID },
+      where: { userId },
       orderBy: { startDate: 'desc' },
     });
   }
 
-  async getPeriod(id: string) {
+  async getPeriod(id: string, userId: string) {
     const period = await this.prisma.budgetPeriod.findFirst({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
     });
     if (!period) throw new NotFoundException('Budget period not found');
-    return this.withUsage(period);
+    return this.withUsage(period, userId);
   }
 
-  createPeriod(dto: CreateBudgetPeriodDto) {
+  createPeriod(dto: CreateBudgetPeriodDto, userId: string) {
     const startDate = new Date(dto.startDate);
     const endDate = new Date(dto.endDate);
     if (startDate > endDate)
@@ -130,16 +133,16 @@ export class BudgetsService {
         'startDate must be before or equal to endDate',
       );
     return this.prisma.budgetPeriod.create({
-      data: { ...dto, startDate, endDate, userId: DEFAULT_USER_ID },
+      data: { ...dto, startDate, endDate, userId },
     });
   }
 
-  async createLimit(dto: CreateBudgetLimitDto) {
-    await this.requirePeriod(dto.budgetPeriodId);
-    await this.requireCategory(dto.categoryId);
+  async createLimit(dto: CreateBudgetLimitDto, userId: string) {
+    await this.requirePeriod(dto.budgetPeriodId, userId);
+    await this.requireCategory(dto.categoryId, userId);
     const exists = await this.prisma.budgetLimit.findFirst({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
         budgetPeriodId: dto.budgetPeriodId,
         categoryId: dto.categoryId,
       },
@@ -149,33 +152,33 @@ export class BudgetsService {
         'Budget limit already exists for this category',
       );
     return this.prisma.budgetLimit.create({
-      data: { ...dto, userId: DEFAULT_USER_ID },
+      data: { ...dto, userId },
       include: { category: true },
     });
   }
 
-  async updateLimit(id: string, dto: UpdateBudgetLimitDto) {
+  async updateLimit(id: string, dto: UpdateBudgetLimitDto, userId: string) {
     const limit = await this.prisma.budgetLimit.findFirst({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
     });
     if (!limit) throw new NotFoundException('Budget limit not found');
     return this.prisma.budgetLimit.update({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
       data: dto,
       include: { category: true },
     });
   }
 
-  private async withUsage(period: BudgetPeriod) {
+  private async withUsage(period: BudgetPeriod, userId: string) {
     const [limits, usage] = await Promise.all([
       this.prisma.budgetLimit.findMany({
-        where: { userId: DEFAULT_USER_ID, budgetPeriodId: period.id },
+        where: { userId, budgetPeriodId: period.id },
         include: { category: true },
       }),
       this.prisma.expense.groupBy({
         by: ['categoryId'],
         where: {
-          userId: DEFAULT_USER_ID,
+          userId,
           expenseDate: { gte: period.startDate, lte: period.endDate },
         },
         _sum: { amount: true },
@@ -216,7 +219,7 @@ export class BudgetsService {
     };
   }
 
-  private async validateCurrent(dto: CreateCurrentBudgetDto) {
+  private async validateCurrent(dto: CreateCurrentBudgetDto, userId: string) {
     if (new Date(dto.startDate) > new Date(dto.endDate))
       throw new BadRequestException(
         'startDate must be before or equal to endDate',
@@ -226,7 +229,7 @@ export class BudgetsService {
       throw new BadRequestException('Budget categories must be unique');
     const categories = await this.prisma.expenseCategory.count({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
         id: { in: categoryIds },
         isActive: true,
       },
@@ -235,19 +238,19 @@ export class BudgetsService {
       throw new NotFoundException('Expense category not found');
   }
 
-  private async requirePeriod(id: string) {
+  private async requirePeriod(id: string, userId: string) {
     if (
       !(await this.prisma.budgetPeriod.findFirst({
-        where: { id, userId: DEFAULT_USER_ID },
+        where: { id, userId },
       }))
     )
       throw new NotFoundException('Budget period not found');
   }
 
-  private async requireCategory(id: string) {
+  private async requireCategory(id: string, userId: string) {
     if (
       !(await this.prisma.expenseCategory.findFirst({
-        where: { id, userId: DEFAULT_USER_ID },
+        where: { id, userId },
       }))
     )
       throw new NotFoundException('Expense category not found');

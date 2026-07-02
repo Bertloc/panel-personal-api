@@ -37,7 +37,7 @@ describe('BudgetsService', () => {
       },
     } as unknown as PrismaService;
 
-    const result = await new BudgetsService(prisma).getCurrent();
+    const result = await new BudgetsService(prisma).getCurrent('user-id');
 
     expect(result.limits[0]).toMatchObject({
       amount: 100,

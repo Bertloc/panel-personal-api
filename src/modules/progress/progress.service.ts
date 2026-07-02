@@ -1,31 +1,31 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { DailyProgress } from '@prisma/client';
-import { DEFAULT_USER_ID, nextUtcDay, startOfUtcDay } from '../../common';
+import { nextUtcDay, startOfUtcDay } from '../../common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { HeatmapQueryDto, RecalculateProgressDto } from './progress.dto';
 @Injectable()
 export class ProgressService {
   constructor(private readonly prisma: PrismaService) {}
-  async getToday() {
+  async getToday(userId: string) {
     const date = startOfUtcDay();
     return (
       (await this.prisma.dailyProgress.findUnique({
         where: {
           userId_progressDate_filterType: {
-            userId: DEFAULT_USER_ID,
+            userId,
             progressDate: date,
             filterType: 'general',
           },
         },
-      })) ?? this.calculate(date)
+      })) ?? this.calculate(date, userId)
     );
   }
-  getHeatmap(query: HeatmapQueryDto) {
+  getHeatmap(query: HeatmapQueryDto, userId: string) {
     const year = query.year ?? new Date().getUTCFullYear();
     const filterType = query.filter ?? query.filterType ?? 'general';
     return this.prisma.dailyProgress.findMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
         filterType,
         progressDate: {
           gte: new Date(Date.UTC(year, 0, 1)),
@@ -35,7 +35,7 @@ export class ProgressService {
       orderBy: { progressDate: 'asc' },
     });
   }
-  async recalculate(dto: RecalculateProgressDto) {
+  async recalculate(dto: RecalculateProgressDto, userId: string) {
     const start = startOfUtcDay(
       new Date(dto.date ?? dto.startDate ?? Date.now()),
     );
@@ -51,10 +51,10 @@ export class ProgressService {
       throw new BadRequestException('Date range cannot exceed 366 days');
     const results: DailyProgress[] = [];
     for (let date = start; date <= end; date = nextUtcDay(date))
-      results.push(await this.calculate(date));
+      results.push(await this.calculate(date, userId));
     return results;
   }
-  private async calculate(date: Date) {
+  private async calculate(date: Date, userId: string) {
     const [
       expenseCount,
       dailyExpense,
@@ -66,30 +66,30 @@ export class ProgressService {
       period,
     ] = await Promise.all([
       this.prisma.expense.count({
-        where: { userId: DEFAULT_USER_ID, expenseDate: date },
+        where: { userId, expenseDate: date },
       }),
       this.prisma.expense.aggregate({
-        where: { userId: DEFAULT_USER_ID, expenseDate: date },
+        where: { userId, expenseDate: date },
         _sum: { amount: true },
       }),
       this.prisma.habit.count({
-        where: { userId: DEFAULT_USER_ID, isActive: true },
+        where: { userId, isActive: true },
       }),
       this.prisma.habitLog.count({
         where: {
-          userId: DEFAULT_USER_ID,
+          userId,
           logDate: date,
           status: 'completed',
-          habit: { userId: DEFAULT_USER_ID, isActive: true },
+          habit: { userId, isActive: true },
         },
       }),
       this.prisma.habitLog.count({
         where: {
-          userId: DEFAULT_USER_ID,
+          userId,
           logDate: date,
           status: 'completed',
           habit: {
-            userId: DEFAULT_USER_ID,
+            userId,
             isFinancial: true,
             isKeyHabit: true,
           },
@@ -97,21 +97,21 @@ export class ProgressService {
       }),
       this.prisma.savingsMovement.count({
         where: {
-          userId: DEFAULT_USER_ID,
+          userId,
           movementDate: date,
           movementType: 'deposit',
         },
       }),
       this.prisma.debtPayment.count({
-        where: { userId: DEFAULT_USER_ID, paymentDate: date },
+        where: { userId, paymentDate: date },
       }),
       this.prisma.budgetPeriod.findFirst({
         where: {
-          userId: DEFAULT_USER_ID,
+          userId,
           startDate: { lte: date },
           endDate: { gte: date },
         },
-        include: { limits: { where: { userId: DEFAULT_USER_ID } } },
+        include: { limits: { where: { userId } } },
       }),
     ]);
     const periodDays = period
@@ -144,13 +144,13 @@ export class ProgressService {
     return this.prisma.dailyProgress.upsert({
       where: {
         userId_progressDate_filterType: {
-          userId: DEFAULT_USER_ID,
+          userId,
           progressDate: date,
           filterType: 'general',
         },
       },
       create: {
-        userId: DEFAULT_USER_ID,
+        userId,
         progressDate: date,
         filterType: 'general',
         score,

@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import { DEFAULT_USER_ID } from '../../common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UpdateProfileDto } from './profiles.dto';
 
@@ -7,19 +6,19 @@ import { UpdateProfileDto } from './profiles.dto';
 export class ProfilesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  get() {
+  get(userId: string) {
     return this.prisma.profile.upsert({
-      where: { userId: DEFAULT_USER_ID },
-      create: { userId: DEFAULT_USER_ID, displayName: 'Personal Profile' },
+      where: { userId },
+      create: { userId, displayName: 'Personal Profile' },
       update: {},
     });
   }
 
-  update(dto: UpdateProfileDto) {
+  update(dto: UpdateProfileDto, userId: string) {
     return this.prisma.profile.upsert({
-      where: { userId: DEFAULT_USER_ID },
+      where: { userId },
       create: {
-        userId: DEFAULT_USER_ID,
+        userId,
         displayName: dto.displayName ?? 'Personal Profile',
         currency: dto.currency,
         timezone: dto.timezone,

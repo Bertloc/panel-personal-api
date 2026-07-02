@@ -33,7 +33,7 @@ describe('SavingsService', () => {
       $transaction: transaction,
     } as unknown as PrismaService;
 
-    await new SavingsService(prisma).removeMovement('movement-id');
+    await new SavingsService(prisma).removeMovement('movement-id', 'user-id');
 
     expect(updatedBalance?.toNumber()).toBe(20);
   });

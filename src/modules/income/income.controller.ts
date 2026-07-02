@@ -16,28 +16,36 @@ import {
   UpdateIncomeSourceDto,
 } from './income.dto';
 import { IncomeService } from './income.service';
+import { CurrentUserId } from '../auth/auth.decorator';
 
 @Controller('api/income/sources')
 export class IncomeController {
   constructor(private readonly service: IncomeService) {}
 
-  @Get() getAll() {
-    return this.service.getAll();
+  @Get() getAll(@CurrentUserId() userId: string) {
+    return this.service.getAll(userId);
   }
 
-  @Post() create(@Body() dto: CreateIncomeSourceDto) {
-    return this.service.create(dto);
+  @Post() create(
+    @Body() dto: CreateIncomeSourceDto,
+    @CurrentUserId() userId: string,
+  ) {
+    return this.service.create(dto, userId);
   }
 
   @Patch(':id') update(
     @Param('id') id: string,
     @Body() dto: UpdateIncomeSourceDto,
+    @CurrentUserId() userId: string,
   ) {
-    return this.service.update(id, dto);
+    return this.service.update(id, dto, userId);
   }
 
-  @Delete(':id') remove(@Param('id') id: string) {
-    return this.service.remove(id);
+  @Delete(':id') remove(
+    @Param('id') id: string,
+    @CurrentUserId() userId: string,
+  ) {
+    return this.service.remove(id, userId);
   }
 }
 
@@ -46,27 +54,34 @@ export class IncomeEventsController {
   constructor(private readonly service: IncomeService) {}
 
   @Get()
-  getAll(@Query() query: IncomeEventsQueryDto) {
-    return this.service.getEvents(query);
+  getAll(
+    @Query() query: IncomeEventsQueryDto,
+    @CurrentUserId() userId: string,
+  ) {
+    return this.service.getEvents(query, userId);
   }
 
   @Post()
-  create(@Body() dto: CreateIncomeEventDto) {
-    return this.service.createEvent(dto);
+  create(@Body() dto: CreateIncomeEventDto, @CurrentUserId() userId: string) {
+    return this.service.createEvent(dto, userId);
   }
 
   @Get(':id')
-  get(@Param('id') id: string) {
-    return this.service.getEvent(id);
+  get(@Param('id') id: string, @CurrentUserId() userId: string) {
+    return this.service.getEvent(id, userId);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateIncomeEventDto) {
-    return this.service.updateEvent(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateIncomeEventDto,
+    @CurrentUserId() userId: string,
+  ) {
+    return this.service.updateEvent(id, dto, userId);
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.service.removeEvent(id);
+  remove(@Param('id') id: string, @CurrentUserId() userId: string) {
+    return this.service.removeEvent(id, userId);
   }
 }

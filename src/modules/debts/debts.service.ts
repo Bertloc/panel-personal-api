@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Debt, Prisma } from '@prisma/client';
-import { DEFAULT_USER_ID, startOfUtcDay } from '../../common';
+import { startOfUtcDay } from '../../common';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   CreateDebtDto,
@@ -17,21 +17,21 @@ import {
 @Injectable()
 export class DebtsService {
   constructor(private readonly prisma: PrismaService) {}
-  async getAll(filters: DebtFiltersDto) {
+  async getAll(filters: DebtFiltersDto, userId: string) {
     const debts = await this.prisma.debt.findMany({
-      where: { userId: DEFAULT_USER_ID, status: filters.status },
+      where: { userId, status: filters.status },
       orderBy: { createdAt: 'desc' },
     });
     return debts.map((debt) => this.withCalculations(debt));
   }
-  async get(id: string) {
+  async get(id: string, userId: string) {
     const debt = await this.prisma.debt.findFirst({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
     });
     if (!debt) throw new NotFoundException('Debt not found');
     return this.withCalculations(debt);
   }
-  async create(dto: CreateDebtDto) {
+  async create(dto: CreateDebtDto, userId: string) {
     const currentAmount = dto.currentAmount ?? dto.initialAmount;
     if (currentAmount > dto.initialAmount)
       throw new BadRequestException(
@@ -43,13 +43,13 @@ export class DebtsService {
         currentAmount,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
         status: dto.status ?? 'active',
-        userId: DEFAULT_USER_ID,
+        userId,
       },
     });
     return this.withCalculations(debt);
   }
-  async update(id: string, dto: UpdateDebtDto) {
-    const current = await this.require(id);
+  async update(id: string, dto: UpdateDebtDto, userId: string) {
+    const current = await this.require(id, userId);
     const initialAmount = dto.initialAmount ?? Number(current.initialAmount);
     const currentAmount = dto.currentAmount ?? Number(current.currentAmount);
     if (currentAmount > initialAmount)
@@ -57,7 +57,7 @@ export class DebtsService {
         'currentAmount cannot exceed initialAmount',
       );
     const debt = await this.prisma.debt.update({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
       data: {
         ...dto,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
@@ -65,16 +65,16 @@ export class DebtsService {
     });
     return this.withCalculations(debt);
   }
-  async remove(id: string) {
-    await this.require(id);
+  async remove(id: string, userId: string) {
+    await this.require(id, userId);
     const debt = await this.prisma.debt.update({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
       data: { status: 'cancelled' },
     });
     return this.withCalculations(debt);
   }
-  async addPayment(id: string, dto: CreateDebtPaymentDto) {
-    const debt = await this.require(id);
+  async addPayment(id: string, dto: CreateDebtPaymentDto, userId: string) {
+    const debt = await this.require(id, userId);
     const balance = new Prisma.Decimal(debt.currentAmount).minus(dto.amount);
     if (balance.isNegative())
       throw new BadRequestException(
@@ -88,11 +88,11 @@ export class DebtsService {
           paymentType: this.paymentType(dto.type ?? dto.paymentType),
           note: dto.note,
           debtId: id,
-          userId: DEFAULT_USER_ID,
+          userId,
         },
       });
       await tx.debt.update({
-        where: { id, userId: DEFAULT_USER_ID },
+        where: { id, userId },
         data: {
           currentAmount: balance,
           status: balance.isZero() ? 'paid' : debt.status,
@@ -101,15 +101,15 @@ export class DebtsService {
       return payment;
     });
   }
-  async getPayments(id: string) {
-    await this.get(id);
+  async getPayments(id: string, userId: string) {
+    await this.get(id, userId);
     return this.prisma.debtPayment.findMany({
-      where: { debtId: id, userId: DEFAULT_USER_ID },
+      where: { debtId: id, userId },
       orderBy: { paymentDate: 'desc' },
     });
   }
-  async updatePayment(id: string, dto: UpdateDebtPaymentDto) {
-    const payment = await this.requirePayment(id);
+  async updatePayment(id: string, dto: UpdateDebtPaymentDto, userId: string) {
+    const payment = await this.requirePayment(id, userId);
     const amount = new Prisma.Decimal(dto.amount ?? payment.amount);
     const balance = new Prisma.Decimal(payment.debt.currentAmount)
       .plus(payment.amount)
@@ -122,7 +122,7 @@ export class DebtsService {
       throw new BadRequestException('Payment cannot be safely recalculated');
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.debtPayment.update({
-        where: { id, userId: DEFAULT_USER_ID },
+        where: { id, userId },
         data: {
           amount,
           paymentDate: dto.paymentDate ? new Date(dto.paymentDate) : undefined,
@@ -134,7 +134,7 @@ export class DebtsService {
         },
       });
       await tx.debt.update({
-        where: { id: payment.debtId, userId: DEFAULT_USER_ID },
+        where: { id: payment.debtId, userId },
         data: {
           currentAmount: balance,
           status: this.statusAfterBalance(payment.debt.status, balance),
@@ -143,8 +143,8 @@ export class DebtsService {
       return updated;
     });
   }
-  async removePayment(id: string) {
-    const payment = await this.requirePayment(id);
+  async removePayment(id: string, userId: string) {
+    const payment = await this.requirePayment(id, userId);
     const balance = new Prisma.Decimal(payment.debt.currentAmount).plus(
       payment.amount,
     );
@@ -152,10 +152,10 @@ export class DebtsService {
       throw new BadRequestException('Payment cannot be safely reverted');
     return this.prisma.$transaction(async (tx) => {
       await tx.debtPayment.delete({
-        where: { id, userId: DEFAULT_USER_ID },
+        where: { id, userId },
       });
       await tx.debt.update({
-        where: { id: payment.debtId, userId: DEFAULT_USER_ID },
+        where: { id: payment.debtId, userId },
         data: {
           currentAmount: balance,
           status: this.statusAfterBalance(payment.debt.status, balance),
@@ -164,8 +164,8 @@ export class DebtsService {
       return { deleted: true };
     });
   }
-  async projection(id: string) {
-    const debt = await this.require(id);
+  async projection(id: string, userId: string) {
+    const debt = await this.require(id, userId);
     const minimum = Number(debt.minimumPayment);
     if (minimum <= 0)
       throw new BadRequestException('minimumPayment must be greater than zero');
@@ -189,17 +189,17 @@ export class DebtsService {
     };
   }
 
-  private async require(id: string) {
+  private async require(id: string, userId: string) {
     const debt = await this.prisma.debt.findFirst({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
     });
     if (!debt) throw new NotFoundException('Debt not found');
     return debt;
   }
 
-  private async requirePayment(id: string) {
+  private async requirePayment(id: string, userId: string) {
     const payment = await this.prisma.debtPayment.findFirst({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
       include: { debt: true },
     });
     if (!payment) throw new NotFoundException('Debt payment not found');

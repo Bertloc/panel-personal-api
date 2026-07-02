@@ -38,8 +38,8 @@ describe('OnboardingService', () => {
       settings: { budgetMode: 'adjusted' },
     };
 
-    await service.complete(dto);
-    await service.complete(dto);
+    await service.complete(dto, 'user-id');
+    await service.complete(dto, 'user-id');
 
     expect(tx.incomeSource.create).toHaveBeenCalledTimes(1);
     expect(tx.incomeSource.update).toHaveBeenCalledTimes(1);

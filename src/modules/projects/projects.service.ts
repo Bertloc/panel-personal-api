@@ -4,7 +4,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { DEFAULT_USER_ID } from '../../common';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   CreateProjectBudgetDto,
@@ -34,11 +33,11 @@ type ProjectWithRelations = Prisma.ProjectGetPayload<{
 export class ProjectsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getAll(query: ProjectQueryDto = {}) {
+  async getAll(query: ProjectQueryDto, userId: string) {
     const limit = query.limit ?? (query.page ? 20 : undefined);
     const projects = await this.prisma.project.findMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
         status: query.status
           ? query.status
           : query.includeArchived
@@ -50,8 +49,8 @@ export class ProjectsService {
         category: query.category,
       },
       include: {
-        tasks: { where: { userId: DEFAULT_USER_ID } },
-        budgets: { where: { userId: DEFAULT_USER_ID } },
+        tasks: { where: { userId } },
+        budgets: { where: { userId } },
       },
       orderBy: { createdAt: 'desc' },
       take: limit,
@@ -62,22 +61,22 @@ export class ProjectsService {
     );
   }
 
-  async get(id: string) {
+  async get(id: string, userId: string) {
     const project = await this.prisma.project.findFirst({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
       include: {
         tasks: {
-          where: { userId: DEFAULT_USER_ID },
+          where: { userId },
           orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
         },
-        budgets: { where: { userId: DEFAULT_USER_ID } },
+        budgets: { where: { userId } },
       },
     });
     if (!project) throw new NotFoundException('Project not found');
     return this.withProgress(project, true);
   }
 
-  async create(dto: CreateProjectDto) {
+  async create(dto: CreateProjectDto, userId: string) {
     this.validateDates(dto.startDate, dto.targetDate);
     const { budgetAmount, ...projectData } = dto;
     const project = await this.prisma.$transaction(async (tx) => {
@@ -89,13 +88,13 @@ export class ProjectsService {
           consumesMoney: dto.consumesMoney ?? false,
           startDate: dto.startDate ? new Date(dto.startDate) : undefined,
           targetDate: dto.targetDate ? new Date(dto.targetDate) : undefined,
-          userId: DEFAULT_USER_ID,
+          userId,
         },
       });
       if (budgetAmount !== undefined)
         await tx.projectBudget.create({
           data: {
-            userId: DEFAULT_USER_ID,
+            userId,
             projectId: created.id,
             name: 'Project budget',
             plannedAmount: budgetAmount,
@@ -103,11 +102,11 @@ export class ProjectsService {
         });
       return created;
     });
-    return this.get(project.id);
+    return this.get(project.id, userId);
   }
 
-  async update(id: string, dto: UpdateProjectDto) {
-    const current = await this.requireProject(id);
+  async update(id: string, dto: UpdateProjectDto, userId: string) {
+    const current = await this.requireProject(id, userId);
     this.validateDates(
       dto.startDate ?? current.startDate?.toISOString(),
       dto.targetDate ?? current.targetDate?.toISOString(),
@@ -115,7 +114,7 @@ export class ProjectsService {
     const { budgetAmount, ...projectData } = dto;
     await this.prisma.$transaction(async (tx) => {
       await tx.project.update({
-        where: { id, userId: DEFAULT_USER_ID },
+        where: { id, userId },
         data: {
           ...projectData,
           priority: dto.priority
@@ -127,18 +126,18 @@ export class ProjectsService {
       });
       if (budgetAmount !== undefined) {
         const budget = await tx.projectBudget.findFirst({
-          where: { projectId: id, userId: DEFAULT_USER_ID },
+          where: { projectId: id, userId },
           orderBy: { createdAt: 'asc' },
         });
         if (budget)
           await tx.projectBudget.update({
-            where: { id: budget.id, userId: DEFAULT_USER_ID },
+            where: { id: budget.id, userId },
             data: { plannedAmount: budgetAmount },
           });
         else
           await tx.projectBudget.create({
             data: {
-              userId: DEFAULT_USER_ID,
+              userId,
               projectId: id,
               name: 'Project budget',
               plannedAmount: budgetAmount,
@@ -146,19 +145,23 @@ export class ProjectsService {
           });
       }
     });
-    return this.get(id);
+    return this.get(id, userId);
   }
 
-  async remove(id: string) {
-    await this.requireProject(id);
+  async remove(id: string, userId: string) {
+    await this.requireProject(id, userId);
     return this.prisma.project.update({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
       data: { status: 'archived' },
     });
   }
 
-  async createTask(projectId: string, dto: CreateProjectTaskDto) {
-    await this.requireProject(projectId);
+  async createTask(
+    projectId: string,
+    dto: CreateProjectTaskDto,
+    userId: string,
+  ) {
+    await this.requireProject(projectId, userId);
     const status = this.normalizeTaskStatus(dto.status ?? 'pending');
     return this.prisma.projectTask.create({
       data: {
@@ -168,17 +171,21 @@ export class ProjectsService {
         dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
         completedAt: status === 'completed' ? new Date() : null,
         projectId,
-        userId: DEFAULT_USER_ID,
+        userId,
       },
     });
   }
 
-  async getTasks(projectId: string, query: ProjectTaskQueryDto = {}) {
-    await this.requireProject(projectId);
+  async getTasks(
+    projectId: string,
+    query: ProjectTaskQueryDto,
+    userId: string,
+  ) {
+    await this.requireProject(projectId, userId);
     return this.prisma.projectTask.findMany({
       where: {
         projectId,
-        userId: DEFAULT_USER_ID,
+        userId,
         status: query.status
           ? { in: this.compatibleTaskStatuses(query.status) }
           : query.includeCancelled
@@ -195,14 +202,15 @@ export class ProjectsService {
   async updateTask(
     taskId: string,
     dto: UpdateProjectTaskDto,
+    userId: string,
     projectId?: string,
   ) {
-    await this.requireTask(taskId, projectId);
+    await this.requireTask(taskId, userId, projectId);
     const status = dto.status
       ? this.normalizeTaskStatus(dto.status)
       : undefined;
     return this.prisma.projectTask.update({
-      where: { id: taskId, userId: DEFAULT_USER_ID },
+      where: { id: taskId, userId },
       data: {
         ...dto,
         status,
@@ -219,20 +227,20 @@ export class ProjectsService {
     });
   }
 
-  async deleteTask(taskId: string, projectId?: string) {
-    await this.requireTask(taskId, projectId);
+  async deleteTask(taskId: string, userId: string, projectId?: string) {
+    await this.requireTask(taskId, userId, projectId);
     return this.prisma.projectTask.update({
-      where: { id: taskId, userId: DEFAULT_USER_ID },
+      where: { id: taskId, userId },
       data: { status: 'cancelled', completedAt: null },
     });
   }
 
-  async summary() {
+  async summary(userId: string) {
     const projects = await this.prisma.project.findMany({
-      where: { userId: DEFAULT_USER_ID },
+      where: { userId },
       include: {
-        tasks: { where: { userId: DEFAULT_USER_ID } },
-        budgets: { where: { userId: DEFAULT_USER_ID } },
+        tasks: { where: { userId } },
+        budgets: { where: { userId } },
       },
     });
     const mapped = projects.map((project) => this.withProgress(project, true));
@@ -301,18 +309,22 @@ export class ProjectsService {
     };
   }
 
-  async getBudgets(projectId: string) {
-    await this.requireProject(projectId);
+  async getBudgets(projectId: string, userId: string) {
+    await this.requireProject(projectId, userId);
     return this.prisma.projectBudget.findMany({
-      where: { projectId, userId: DEFAULT_USER_ID },
+      where: { projectId, userId },
       orderBy: { createdAt: 'asc' },
     });
   }
 
-  async createBudget(projectId: string, dto: CreateProjectBudgetDto) {
-    await this.requireProject(projectId);
+  async createBudget(
+    projectId: string,
+    dto: CreateProjectBudgetDto,
+    userId: string,
+  ) {
+    await this.requireProject(projectId, userId);
     return this.prisma.projectBudget.create({
-      data: { ...dto, projectId, userId: DEFAULT_USER_ID },
+      data: { ...dto, projectId, userId },
     });
   }
 
@@ -320,13 +332,14 @@ export class ProjectsService {
     projectId: string,
     budgetId: string,
     dto: UpdateProjectBudgetDto,
+    userId: string,
   ) {
     const budget = await this.prisma.projectBudget.findFirst({
-      where: { id: budgetId, projectId, userId: DEFAULT_USER_ID },
+      where: { id: budgetId, projectId, userId },
     });
     if (!budget) throw new NotFoundException('Project budget not found');
     return this.prisma.projectBudget.update({
-      where: { id: budgetId, userId: DEFAULT_USER_ID },
+      where: { id: budgetId, userId },
       data: dto,
     });
   }
@@ -410,17 +423,17 @@ export class ProjectsService {
       : [priority];
   }
 
-  private async requireProject(id: string) {
+  private async requireProject(id: string, userId: string) {
     const project = await this.prisma.project.findFirst({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
     });
     if (!project) throw new NotFoundException('Project not found');
     return project;
   }
 
-  private async requireTask(id: string, projectId?: string) {
+  private async requireTask(id: string, userId: string, projectId?: string) {
     const task = await this.prisma.projectTask.findFirst({
-      where: { id, projectId, userId: DEFAULT_USER_ID },
+      where: { id, projectId, userId },
     });
     if (!task) throw new NotFoundException('Project task not found');
     return task;

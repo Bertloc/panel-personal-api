@@ -3,7 +3,6 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { DEFAULT_USER_ID } from '../../common';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   CreateIncomeEventDto,
@@ -17,31 +16,31 @@ import {
 export class IncomeService {
   constructor(private readonly prisma: PrismaService) {}
 
-  getAll() {
+  getAll(userId: string) {
     return this.prisma.incomeSource.findMany({
-      where: { userId: DEFAULT_USER_ID, isActive: true },
+      where: { userId, isActive: true },
       orderBy: { createdAt: 'asc' },
     });
   }
 
-  async create(dto: CreateIncomeSourceDto) {
-    await this.requireUniqueName(dto.name);
+  async create(dto: CreateIncomeSourceDto, userId: string) {
+    await this.requireUniqueName(dto.name, userId);
     return this.prisma.incomeSource.create({
       data: {
         ...dto,
         nextPaymentDate: dto.nextPaymentDate
           ? new Date(dto.nextPaymentDate)
           : undefined,
-        userId: DEFAULT_USER_ID,
+        userId,
       },
     });
   }
 
-  async update(id: string, dto: UpdateIncomeSourceDto) {
-    await this.require(id);
-    if (dto.name) await this.requireUniqueName(dto.name, id);
+  async update(id: string, dto: UpdateIncomeSourceDto, userId: string) {
+    await this.require(id, userId);
+    if (dto.name) await this.requireUniqueName(dto.name, userId, id);
     return this.prisma.incomeSource.update({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
       data: {
         ...dto,
         nextPaymentDate: dto.nextPaymentDate
@@ -51,15 +50,15 @@ export class IncomeService {
     });
   }
 
-  async remove(id: string) {
-    await this.require(id);
+  async remove(id: string, userId: string) {
+    await this.require(id, userId);
     return this.prisma.incomeSource.update({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
       data: { isActive: false },
     });
   }
 
-  getEvents(query: IncomeEventsQueryDto) {
+  getEvents(query: IncomeEventsQueryDto, userId: string) {
     const limit = query.limit ?? (query.page ? 20 : undefined);
     const incomeDate =
       query.startDate || query.endDate
@@ -70,7 +69,7 @@ export class IncomeService {
         : undefined;
     return this.prisma.incomeEvent.findMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
         sourceId: query.sourceId,
         type: query.type,
         incomeDate,
@@ -82,22 +81,22 @@ export class IncomeService {
     });
   }
 
-  async getEvent(id: string) {
+  async getEvent(id: string, userId: string) {
     const event = await this.prisma.incomeEvent.findFirst({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
       include: { incomeSource: true },
     });
     if (!event) throw new NotFoundException('Income event not found');
     return event;
   }
 
-  async createEvent(dto: CreateIncomeEventDto) {
+  async createEvent(dto: CreateIncomeEventDto, userId: string) {
     const source = dto.sourceId
-      ? await this.requireActiveSource(dto.sourceId)
+      ? await this.requireActiveSource(dto.sourceId, userId)
       : null;
     return this.prisma.incomeEvent.create({
       data: {
-        userId: DEFAULT_USER_ID,
+        userId,
         sourceId: dto.sourceId,
         source: source?.name ?? 'manual',
         amount: dto.amount,
@@ -109,13 +108,13 @@ export class IncomeService {
     });
   }
 
-  async updateEvent(id: string, dto: UpdateIncomeEventDto) {
-    await this.getEvent(id);
+  async updateEvent(id: string, dto: UpdateIncomeEventDto, userId: string) {
+    await this.getEvent(id, userId);
     const source = dto.sourceId
-      ? await this.requireActiveSource(dto.sourceId)
+      ? await this.requireActiveSource(dto.sourceId, userId)
       : null;
     return this.prisma.incomeEvent.update({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
       data: {
         ...dto,
         source: source?.name,
@@ -125,34 +124,38 @@ export class IncomeService {
     });
   }
 
-  async removeEvent(id: string) {
-    await this.getEvent(id);
+  async removeEvent(id: string, userId: string) {
+    await this.getEvent(id, userId);
     return this.prisma.incomeEvent.delete({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
     });
   }
 
-  private async require(id: string) {
+  private async require(id: string, userId: string) {
     const source = await this.prisma.incomeSource.findFirst({
-      where: { id, userId: DEFAULT_USER_ID },
+      where: { id, userId },
     });
     if (!source) throw new NotFoundException('Income source not found');
     return source;
   }
 
-  private async requireActiveSource(id: string) {
+  private async requireActiveSource(id: string, userId: string) {
     const source = await this.prisma.incomeSource.findFirst({
-      where: { id, userId: DEFAULT_USER_ID, isActive: true },
+      where: { id, userId, isActive: true },
     });
     if (!source) throw new NotFoundException('Income source not found');
     return source;
   }
 
-  private async requireUniqueName(name: string, excludedId?: string) {
+  private async requireUniqueName(
+    name: string,
+    userId: string,
+    excludedId?: string,
+  ) {
     if (
       await this.prisma.incomeSource.findFirst({
         where: {
-          userId: DEFAULT_USER_ID,
+          userId,
           name,
           ...(excludedId ? { NOT: { id: excludedId } } : {}),
         },
