@@ -8,9 +8,11 @@ export type AuthenticatedRequest = Request & { user: AuthenticatedUser };
 export class AuthGuard implements CanActivate {
   constructor(private readonly auth: AuthService) {}
 
-  canActivate(context: ExecutionContext) {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
-    request.user = this.auth.authenticate(request.headers.authorization);
+
+    request.user = await this.auth.authenticate(request.headers.authorization);
+
     return true;
   }
 }
