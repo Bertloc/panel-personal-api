@@ -49,6 +49,39 @@ describe('ProjectsService', () => {
     };
   };
 
+  const createTaskService = (initialStatus = 'pending') => {
+    let task = {
+      id: 'task-id',
+      userId: 'user-id',
+      projectId: 'project-id',
+      title: 'Tarea prueba',
+      status: initialStatus,
+      priority: 'medium',
+      dueDate: null,
+      completedAt: null as Date | null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    const projectTask = {
+      create: jest.fn().mockImplementation(({ data }) => {
+        task = { ...task, ...data };
+        return Promise.resolve(task);
+      }),
+      findFirst: jest.fn().mockImplementation(() => Promise.resolve(task)),
+      findMany: jest.fn().mockImplementation(() => Promise.resolve([task])),
+      update: jest.fn().mockImplementation(({ data }) => {
+        task = { ...task, ...data };
+        return Promise.resolve(task);
+      }),
+    };
+    const prisma = {
+      project: { findFirst: jest.fn().mockResolvedValue({ id: 'project-id' }) },
+      projectTask,
+    } as unknown as PrismaService;
+
+    return new ProjectsService(prisma);
+  };
+
   it.each([
     {
       name: 'Proyecto prueba',
@@ -123,6 +156,69 @@ describe('ProjectsService', () => {
       },
     });
   });
+
+  it('creates tasks as pending and persists every current status transition', async () => {
+    const service = createTaskService();
+
+    const created = await service.createTask(
+      'project-id',
+      { title: 'Tarea prueba' },
+      'user-id',
+    );
+    expect(created).toMatchObject({ status: 'pending', completedAt: null });
+
+    const inProgress = await service.updateTask(
+      'task-id',
+      { status: 'in_progress' },
+      'user-id',
+    );
+    expect(inProgress).toMatchObject({
+      status: 'in_progress',
+      completedAt: null,
+    });
+
+    const completed = await service.updateTask(
+      'task-id',
+      { status: 'completed' },
+      'user-id',
+    );
+    expect(completed.status).toBe('completed');
+    expect(completed.completedAt).toBeInstanceOf(Date);
+
+    const pending = await service.updateTask(
+      'task-id',
+      { status: 'pending' },
+      'user-id',
+    );
+    expect(pending).toMatchObject({ status: 'pending', completedAt: null });
+
+    await expect(
+      service.updateTask('task-id', { status: 'blocked' }, 'user-id'),
+    ).resolves.toMatchObject({ status: 'blocked', completedAt: null });
+    await expect(
+      service.updateTask('task-id', { status: 'cancelled' }, 'user-id'),
+    ).resolves.toMatchObject({ status: 'cancelled', completedAt: null });
+
+    await service.updateTask('task-id', { status: 'in_progress' }, 'user-id');
+    const tasks = await service.getTasks('project-id', {}, 'user-id');
+    expect(tasks).toEqual([
+      expect.objectContaining({ id: 'task-id', status: 'in_progress' }),
+    ]);
+  });
+
+  it.each([
+    ['todo', 'pending'],
+    ['done', 'completed'],
+  ])(
+    'normalizes stored legacy status %s to %s in GET',
+    async (stored, current) => {
+      const service = createTaskService(stored);
+
+      const tasks = await service.getTasks('project-id', {}, 'user-id');
+
+      expect(tasks[0].status).toBe(current);
+    },
+  );
 
   it('calculates progress without cancelled tasks and summarizes costs', async () => {
     const projects = [

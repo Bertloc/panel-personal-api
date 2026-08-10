@@ -162,14 +162,13 @@ export class ProjectsService {
     userId: string,
   ) {
     await this.requireProject(projectId, userId);
-    const status = this.normalizeTaskStatus(dto.status ?? 'pending');
     return this.prisma.projectTask.create({
       data: {
         ...dto,
-        status,
+        status: 'pending',
         priority: this.normalizePriority(dto.priority ?? 'medium'),
         dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
-        completedAt: status === 'completed' ? new Date() : null,
+        completedAt: null,
         projectId,
         userId,
       },
@@ -182,7 +181,7 @@ export class ProjectsService {
     userId: string,
   ) {
     await this.requireProject(projectId, userId);
-    return this.prisma.projectTask.findMany({
+    const tasks = await this.prisma.projectTask.findMany({
       where: {
         projectId,
         userId,
@@ -197,6 +196,7 @@ export class ProjectsService {
       },
       orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
     });
+    return tasks.map((task) => this.withCurrentTaskStatus(task));
   }
 
   async updateTask(
@@ -209,7 +209,7 @@ export class ProjectsService {
     const status = dto.status
       ? this.normalizeTaskStatus(dto.status)
       : undefined;
-    return this.prisma.projectTask.update({
+    const task = await this.prisma.projectTask.update({
       where: { id: taskId, userId },
       data: {
         ...dto,
@@ -225,6 +225,7 @@ export class ProjectsService {
           : undefined,
       },
     });
+    return this.withCurrentTaskStatus(task);
   }
 
   async deleteTask(taskId: string, userId: string, projectId?: string) {
@@ -382,12 +383,17 @@ export class ProjectsService {
       tasksCount: activeTasks.length,
       completedTasks,
       progressPercent,
-      nextTask: nextTask ?? null,
+      nextTask: nextTask ? this.withCurrentTaskStatus(nextTask) : null,
       stats: { totalTasks: activeTasks.length, completedTasks },
       // Existing frontend aliases.
       progress: progressPercent,
       budget: budgetAmount,
-      ...(includeTasks ? { tasks, budgets } : {}),
+      ...(includeTasks
+        ? {
+            tasks: tasks.map((task) => this.withCurrentTaskStatus(task)),
+            budgets,
+          }
+        : {}),
     };
   }
 
@@ -404,6 +410,10 @@ export class ProjectsService {
       : status === 'done'
         ? 'completed'
         : status;
+  }
+
+  private withCurrentTaskStatus<T extends { status: string }>(task: T) {
+    return { ...task, status: this.normalizeTaskStatus(task.status) };
   }
 
   private compatibleTaskStatuses(status: string) {
