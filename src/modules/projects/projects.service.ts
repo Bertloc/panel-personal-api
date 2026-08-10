@@ -91,7 +91,7 @@ export class ProjectsService {
           userId,
         },
       });
-      if (budgetAmount !== undefined)
+      if (created.consumesMoney && budgetAmount !== undefined)
         await tx.projectBudget.create({
           data: {
             userId,

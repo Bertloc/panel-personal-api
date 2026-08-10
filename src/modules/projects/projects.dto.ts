@@ -9,6 +9,7 @@ import {
   IsString,
   Min,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
 export const PROJECT_STATUS = [
   'planned',
@@ -61,7 +62,11 @@ export class CreateProjectDto {
   @IsOptional() @IsDateString() startDate?: string;
   @IsOptional() @IsDateString() targetDate?: string;
   @IsOptional() @IsBoolean() consumesMoney?: boolean;
-  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) budgetAmount?: number;
+  @ValidateIf((_, value) => value !== undefined)
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  budgetAmount?: number;
 }
 export class UpdateProjectDto {
   @IsOptional() @IsString() @MinLength(1) name?: string;
