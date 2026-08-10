@@ -82,6 +82,75 @@ describe('ProjectsService', () => {
     return new ProjectsService(prisma);
   };
 
+  const createCompletionService = (statuses: string[]) => {
+    let project = {
+      id: 'project-id',
+      userId: 'user-id',
+      name: 'Proyecto prueba',
+      description: null,
+      category: null,
+      status: 'active',
+      priority: 'medium',
+      startDate: null,
+      targetDate: null,
+      consumesMoney: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    const tasks = statuses.map((status, index) => ({
+      id: `task-${index}`,
+      userId: 'user-id',
+      projectId: 'project-id',
+      title: `Tarea ${index}`,
+      description: null,
+      status,
+      priority: 'medium',
+      dueDate: null,
+      estimatedCost: null,
+      actualCost: null,
+      order: index,
+      completedAt: status === 'completed' ? new Date() : null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }));
+    const projectUpdate = jest.fn().mockImplementation(({ data }) => {
+      project = { ...project, ...data };
+      return Promise.resolve(project);
+    });
+    const prisma = {
+      project: {
+        findFirst: jest
+          .fn()
+          .mockImplementation(({ include }) =>
+            Promise.resolve(
+              include ? { ...project, tasks, budgets: [] } : project,
+            ),
+          ),
+        update: projectUpdate,
+      },
+      projectTask: {
+        findMany: jest
+          .fn()
+          .mockImplementation(({ where }) =>
+            Promise.resolve(
+              tasks
+                .filter(
+                  (task) =>
+                    where.status?.not !== 'cancelled' ||
+                    task.status !== 'cancelled',
+                )
+                .map(({ status }) => ({ status })),
+            ),
+          ),
+      },
+      $transaction: jest.fn((callback) =>
+        callback({ project: { update: projectUpdate } }),
+      ),
+    } as unknown as PrismaService;
+
+    return { service: new ProjectsService(prisma), projectUpdate };
+  };
+
   it.each([
     {
       name: 'Proyecto prueba',
@@ -219,6 +288,57 @@ describe('ProjectsService', () => {
       expect(tasks[0].status).toBe(current);
     },
   );
+
+  it.each<{ statuses: string[]; expectedMessage: string }>([
+    {
+      statuses: [],
+      expectedMessage:
+        'Project must have at least one non-cancelled task to be completed',
+    },
+    {
+      statuses: ['cancelled'],
+      expectedMessage:
+        'Project must have at least one non-cancelled task to be completed',
+    },
+    {
+      statuses: ['pending'],
+      expectedMessage: 'All non-cancelled project tasks must be completed',
+    },
+    {
+      statuses: ['completed', 'pending'],
+      expectedMessage: 'All non-cancelled project tasks must be completed',
+    },
+  ])(
+    'rejects project completion for tasks %#',
+    async ({ statuses, expectedMessage }) => {
+      const { service, projectUpdate } = createCompletionService(statuses);
+
+      await expect(service.complete('project-id', 'user-id')).rejects.toThrow(
+        expectedMessage,
+      );
+      expect(projectUpdate).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each<{ statuses: string[] }>([
+    { statuses: ['completed'] },
+    { statuses: ['completed', 'cancelled'] },
+  ])('completes a project for tasks %#', async ({ statuses }) => {
+    const { service } = createCompletionService(statuses);
+
+    const result = await service.complete('project-id', 'user-id');
+
+    expect(result.status).toBe('completed');
+  });
+
+  it('does not let PATCH bypass project completion validation', async () => {
+    const { service, projectUpdate } = createCompletionService(['pending']);
+
+    await expect(
+      service.update('project-id', { status: 'completed' }, 'user-id'),
+    ).rejects.toThrow('All non-cancelled project tasks must be completed');
+    expect(projectUpdate).not.toHaveBeenCalled();
+  });
 
   it('calculates progress without cancelled tasks and summarizes costs', async () => {
     const projects = [

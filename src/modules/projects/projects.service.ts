@@ -107,6 +107,8 @@ export class ProjectsService {
 
   async update(id: string, dto: UpdateProjectDto, userId: string) {
     const current = await this.requireProject(id, userId);
+    if (dto.status === 'completed')
+      await this.validateProjectCompletion(id, userId);
     this.validateDates(
       dto.startDate ?? current.startDate?.toISOString(),
       dto.targetDate ?? current.targetDate?.toISOString(),
@@ -144,6 +146,16 @@ export class ProjectsService {
             },
           });
       }
+    });
+    return this.get(id, userId);
+  }
+
+  async complete(id: string, userId: string) {
+    await this.requireProject(id, userId);
+    await this.validateProjectCompletion(id, userId);
+    await this.prisma.project.update({
+      where: { id, userId },
+      data: { status: 'completed' },
     });
     return this.get(id, userId);
   }
@@ -431,6 +443,21 @@ export class ProjectsService {
     return priority === 'urgent' || priority === 'critical'
       ? ['urgent', 'critical']
       : [priority];
+  }
+
+  private async validateProjectCompletion(id: string, userId: string) {
+    const tasks = await this.prisma.projectTask.findMany({
+      where: { projectId: id, userId, status: { not: 'cancelled' } },
+      select: { status: true },
+    });
+    if (!tasks.length)
+      throw new BadRequestException(
+        'Project must have at least one non-cancelled task to be completed',
+      );
+    if (tasks.some((task) => !completedStatuses.includes(task.status)))
+      throw new BadRequestException(
+        'All non-cancelled project tasks must be completed',
+      );
   }
 
   private async requireProject(id: string, userId: string) {

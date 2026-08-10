@@ -61,6 +61,12 @@ export class ProjectsController {
   ) {
     return this.service.update(id, dto, userId);
   }
+  @Post(':id/complete') complete(
+    @Param('id') id: string,
+    @CurrentUserId() userId: string,
+  ) {
+    return this.service.complete(id, userId);
+  }
   @Delete(':id') remove(
     @Param('id') id: string,
     @CurrentUserId() userId: string,
