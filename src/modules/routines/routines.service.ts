@@ -6,6 +6,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { nextUtcDay, startOfUtcDay } from '../../common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { calculateDailyProgress } from '../progress/daily-progress';
 import {
   CreateRoutineDto,
   CreateRoutineItemDto,
@@ -152,12 +153,17 @@ export class RoutinesService {
     return (await this.getToday({}, userId)).summary;
   }
 
+  async getSummaryForDate(date: Date, userId: string) {
+    const routines = await this.loadRoutines(date, date, userId);
+    return this.dayResult(date, routines).summary;
+  }
+
   async createLog(dto: CreateRoutineLogDto, userId: string) {
     const item = await this.requireItem(dto.routineItemId, userId);
     if (item.routineId !== dto.routineId)
       throw new BadRequestException('Routine item does not belong to routine');
     const logDate = this.parseDate(dto.logDate);
-    return this.prisma.routineLog.upsert({
+    const log = await this.prisma.routineLog.upsert({
       where: {
         userId_routineItemId_logDate: {
           userId,
@@ -168,21 +174,27 @@ export class RoutinesService {
       create: { ...dto, logDate, userId },
       update: { status: dto.status, note: dto.note, routineId: dto.routineId },
     });
+    await this.recalculateProgress(logDate, userId);
+    return log;
   }
 
   async updateLog(id: string, dto: UpdateRoutineLogDto, userId: string) {
-    await this.requireLog(id, userId);
-    return this.prisma.routineLog.update({
+    const current = await this.requireLog(id, userId);
+    const log = await this.prisma.routineLog.update({
       where: { id, userId },
       data: dto,
     });
+    await this.recalculateProgress(current.logDate, userId);
+    return log;
   }
 
   async removeLog(id: string, userId: string) {
-    await this.requireLog(id, userId);
-    return this.prisma.routineLog.delete({
+    const current = await this.requireLog(id, userId);
+    const log = await this.prisma.routineLog.delete({
       where: { id, userId },
     });
+    await this.recalculateProgress(current.logDate, userId);
+    return log;
   }
 
   async history(query: RoutineHistoryQueryDto, userId: string) {
@@ -436,6 +448,11 @@ export class RoutinesService {
 
   private dateString(value: Date) {
     return value.toISOString().slice(0, 10);
+  }
+
+  private async recalculateProgress(date: Date, userId: string) {
+    const routine = await this.getSummaryForDate(date, userId);
+    await calculateDailyProgress(this.prisma, date, userId, routine);
   }
 
   private async requireRoutine(id: string, userId: string) {

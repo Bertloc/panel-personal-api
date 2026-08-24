@@ -2,10 +2,15 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { DailyProgress } from '@prisma/client';
 import { nextUtcDay, startOfUtcDay } from '../../common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { RoutinesService } from '../routines/routines.service';
+import { calculateDailyProgress } from './daily-progress';
 import { HeatmapQueryDto, RecalculateProgressDto } from './progress.dto';
 @Injectable()
 export class ProgressService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly routines: RoutinesService,
+  ) {}
   async getToday(userId: string) {
     const date = startOfUtcDay();
     return (
@@ -54,124 +59,8 @@ export class ProgressService {
       results.push(await this.calculate(date, userId));
     return results;
   }
-  private async calculate(date: Date, userId: string) {
-    const [
-      expenseCount,
-      dailyExpense,
-      habits,
-      completedLogs,
-      keyLog,
-      saved,
-      paid,
-      period,
-    ] = await Promise.all([
-      this.prisma.expense.count({
-        where: { userId, expenseDate: date },
-      }),
-      this.prisma.expense.aggregate({
-        where: { userId, expenseDate: date },
-        _sum: { amount: true },
-      }),
-      this.prisma.habit.count({
-        where: { userId, isActive: true },
-      }),
-      this.prisma.habitLog.count({
-        where: {
-          userId,
-          logDate: date,
-          status: 'completed',
-          habit: { userId, isActive: true },
-        },
-      }),
-      this.prisma.habitLog.count({
-        where: {
-          userId,
-          logDate: date,
-          status: 'completed',
-          habit: {
-            userId,
-            isFinancial: true,
-            isKeyHabit: true,
-          },
-        },
-      }),
-      this.prisma.savingsMovement.count({
-        where: {
-          userId,
-          movementDate: date,
-          movementType: 'deposit',
-        },
-      }),
-      this.prisma.debtPayment.count({
-        where: { userId, paymentDate: date },
-      }),
-      this.prisma.budgetPeriod.findFirst({
-        where: {
-          userId,
-          startDate: { lte: date },
-          endDate: { gte: date },
-        },
-        include: { limits: { where: { userId } } },
-      }),
-    ]);
-    const periodDays = period
-      ? Math.round(
-          (nextUtcDay(period.endDate).getTime() - period.startDate.getTime()) /
-            86400000,
-        )
-      : 0;
-    const dailyLimit = period
-      ? period.limits.reduce(
-          (sum, limit) => sum + Number(limit.limitAmount),
-          0,
-        ) / periodDays
-      : 0;
-    const expenseRegistered = expenseCount > 0;
-    const withinDailyLimit =
-      Boolean(period?.limits.length) &&
-      Number(dailyExpense._sum.amount ?? 0) <= dailyLimit;
-    const habitsCompletionRate = habits ? (completedLogs / habits) * 100 : 0;
-    const financialKeyHabitDone = keyLog > 0;
-    const savedOrPaidDebt = saved + paid > 0;
-    const score =
-      Number(expenseRegistered) +
-      Number(withinDailyLimit) +
-      Number(habitsCompletionRate >= 60) +
-      Number(financialKeyHabitDone) +
-      Number(savedOrPaidDebt);
-    const value = Math.min(score, 4);
-    const state = ['empty', 'low', 'medium', 'good', 'excellent'][value];
-    return this.prisma.dailyProgress.upsert({
-      where: {
-        userId_progressDate_filterType: {
-          userId,
-          progressDate: date,
-          filterType: 'general',
-        },
-      },
-      create: {
-        userId,
-        progressDate: date,
-        filterType: 'general',
-        score,
-        value,
-        state,
-        expenseRegistered,
-        withinDailyLimit,
-        habitsCompletionRate,
-        financialKeyHabitDone,
-        savedOrPaidDebt,
-      },
-      update: {
-        score,
-        value,
-        state,
-        expenseRegistered,
-        withinDailyLimit,
-        habitsCompletionRate,
-        financialKeyHabitDone,
-        savedOrPaidDebt,
-      },
-    });
+  async calculate(date: Date, userId: string) {
+    const routine = await this.routines.getSummaryForDate(date, userId);
+    return calculateDailyProgress(this.prisma, date, userId, routine);
   }
 }

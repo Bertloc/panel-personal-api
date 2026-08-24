@@ -3,111 +3,53 @@ import { RoutinesService } from '../routines/routines.service';
 import { ProgressService } from './progress.service';
 
 describe('ProgressService', () => {
-  it('maps habits to routine and keeps enriched and legacy heatmap values', async () => {
-    const prisma = {
-      budgetPeriod: { findMany: jest.fn().mockResolvedValue([]) },
-      expense: { findMany: jest.fn().mockResolvedValue([]) },
-      incomeEvent: { findMany: jest.fn().mockResolvedValue([]) },
-      debtPayment: { findMany: jest.fn().mockResolvedValue([]) },
-      debt: { findMany: jest.fn().mockResolvedValue([]) },
-      savingsMovement: { findMany: jest.fn().mockResolvedValue([]) },
-      projectTask: { findMany: jest.fn().mockResolvedValue([]) },
-    } as unknown as PrismaService;
-    const routines = {
-      history: jest.fn().mockResolvedValue({
-        days: [
-          {
-            date: '2026-01-05',
-            total: 1,
-            done: 1,
-            pending: 0,
-            skipped: 0,
-            missed: 0,
-            completionPercent: 100,
-          },
-        ],
-      }),
-    } as unknown as RoutinesService;
+  it.each([
+    { total: 1, done: 1, completionPercent: 100, expectedPoint: 1 },
+    { total: 5, done: 3, completionPercent: 60, expectedPoint: 1 },
+    { total: 5, done: 2, completionPercent: 40, expectedPoint: 0 },
+  ])(
+    'uses scheduled routine completion $completionPercent% for the general score',
+    async ({ total, done, completionPercent, expectedPoint }) => {
+      const upsert = jest
+        .fn()
+        .mockImplementation(({ create }: { create: unknown }) => create);
+      const prisma = {
+        expense: {
+          count: jest.fn().mockResolvedValue(0),
+          aggregate: jest.fn().mockResolvedValue({ _sum: { amount: null } }),
+        },
+        habitLog: { count: jest.fn().mockResolvedValue(0) },
+        savingsMovement: { count: jest.fn().mockResolvedValue(0) },
+        debtPayment: { count: jest.fn().mockResolvedValue(0) },
+        budgetPeriod: { findFirst: jest.fn().mockResolvedValue(null) },
+        dailyProgress: { upsert },
+      } as unknown as PrismaService;
+      const routines = {
+        getSummaryForDate: jest.fn().mockResolvedValue({
+          total,
+          done,
+          pending: total - done,
+          skipped: 0,
+          missed: 0,
+          completionPercent,
+        }),
+      } as unknown as RoutinesService;
+      const date = new Date('2026-08-23T00:00:00.000Z');
 
-    const result = await new ProgressService(prisma, routines).getHeatmap({
-      filter: 'habits',
-      year: 2026,
-    });
-    const dayIndex = result.items.findIndex(
-      (item) => item.date === '2026-01-05',
-    );
+      await new ProgressService(prisma, routines).recalculate(
+        { date: '2026-08-23' },
+        'user-id',
+      );
 
-    expect(result.filter).toBe('routine');
-    expect(result.items).toHaveLength(365);
-    expect(result.items[dayIndex]).toMatchObject({ value: 100, level: 4 });
-    expect(result.days[dayIndex]).toMatchObject({ value: 4, score: 100 });
-  });
-
-  it('redistributes the configured weights across real daily signals', async () => {
-    const prisma = {
-      budgetPeriod: {
-        findMany: jest.fn().mockResolvedValue([
-          {
-            startDate: new Date('2026-07-01T00:00:00.000Z'),
-            endDate: new Date('2026-07-10T00:00:00.000Z'),
-            limits: [{ limitAmount: new Prisma.Decimal(1000) }],
-          },
-        ]),
-      },
-      expense: {
-        findMany: jest.fn().mockResolvedValue([
-          {
-            amount: new Prisma.Decimal(50),
-            expenseDate: new Date('2026-07-01T00:00:00.000Z'),
-          },
-        ]),
-      },
-      incomeEvent: { findMany: jest.fn().mockResolvedValue([]) },
-      debtPayment: {
-        findMany: jest.fn().mockResolvedValue([
-          {
-            amount: new Prisma.Decimal(100),
-            paymentDate: new Date('2026-07-01T00:00:00.000Z'),
-          },
-        ]),
-      },
-      debt: { findMany: jest.fn().mockResolvedValue([]) },
-      savingsMovement: {
-        findMany: jest.fn().mockResolvedValue([
-          {
-            amount: new Prisma.Decimal(20),
-            movementDate: new Date('2026-07-01T00:00:00.000Z'),
-            movementType: 'deposit',
-          },
-        ]),
-      },
-      projectTask: { findMany: jest.fn().mockResolvedValue([]) },
-    } as unknown as PrismaService;
-    const routines = {
-      history: jest.fn().mockResolvedValue({
-        days: [
-          {
-            date: '2026-07-01',
-            total: 2,
-            done: 1,
-            pending: 1,
-            skipped: 0,
-            missed: 0,
-            completionPercent: 50,
-          },
-        ],
-      }),
-    } as unknown as RoutinesService;
-
-    const result = await new ProgressService(prisma, routines).getDay(
-      '2026-07-01',
-    );
-
-    expect(result.general).toBe(82.5);
-    expect(result.money.score).toBe(100);
-    expect(result.routine.score).toBe(50);
-    expect(result.debt.score).toBe(100);
-    expect(result.saving.score).toBe(100);
-  });
+      expect(routines.getSummaryForDate).toHaveBeenCalledWith(date, 'user-id');
+      expect(upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({
+            habitsCompletionRate: completionPercent,
+            score: expectedPoint,
+          }),
+        }),
+      );
+    },
+  );
 });
-import { Prisma } from '@prisma/client';
