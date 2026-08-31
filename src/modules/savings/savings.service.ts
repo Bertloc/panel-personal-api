@@ -11,6 +11,7 @@ import {
   UpdateSavingsGoalDto,
   UpdateSavingsMovementDto,
 } from './savings.dto';
+import { monthlySavingsSuggestion } from './savings-calculations.util';
 @Injectable()
 export class SavingsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -201,19 +202,11 @@ export class SavingsService {
     const targetAmount = Number(goal.targetAmount);
     const currentAmount = Number(goal.currentAmount);
     const remainingAmount = Math.max(0, targetAmount - currentAmount);
-    let monthlySuggestedAmount: number | null = null;
-    if (goal.targetDate) {
-      const today = new Date();
-      // ponytail: calendar-month estimate; add contribution schedules when exact dates matter.
-      const months = Math.max(
-        1,
-        (goal.targetDate.getUTCFullYear() - today.getUTCFullYear()) * 12 +
-          goal.targetDate.getUTCMonth() -
-          today.getUTCMonth() +
-          Number(goal.targetDate.getUTCDate() > today.getUTCDate()),
-      );
-      monthlySuggestedAmount = remainingAmount / months;
-    }
+    const monthlySuggestedAmount = monthlySavingsSuggestion(
+      currentAmount,
+      targetAmount,
+      goal.targetDate,
+    );
     return {
       ...goal,
       progressPercent: targetAmount

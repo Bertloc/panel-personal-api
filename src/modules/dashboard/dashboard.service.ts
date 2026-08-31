@@ -3,6 +3,7 @@ import { startOfUtcDay } from '../../common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RoutinesService } from '../routines/routines.service';
 import { ProjectsService } from '../projects/projects.service';
+import { expectedIncomeInRange } from '../income/income-period.util';
 @Injectable()
 export class DashboardService {
   constructor(
@@ -164,10 +165,9 @@ export class DashboardService {
         _count: { _all: true },
       }),
     ]);
-    // ponytail: configured sources are the fallback estimate until real events exist in the period.
     const periodIncomeIsEstimated = actualIncome._count._all === 0;
     const periodIncome = periodIncomeIsEstimated
-      ? incomeSources.reduce((sum, source) => sum + Number(source.amount), 0)
+      ? expectedIncomeInRange(incomeSources, periodStart, periodEnd)
       : Number(actualIncome._sum.amount ?? 0);
     const periodSpent = Number(periodExpenses._sum.amount ?? 0);
     const upcomingTotal = upcomingPayments

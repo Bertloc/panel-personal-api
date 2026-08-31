@@ -18,10 +18,19 @@ import {
   UpdateExpenseDto,
 } from './money.dto';
 import { CurrentUserId } from '../auth/auth.decorator';
+import { FinancialGuidanceService } from './financial-guidance.service';
 
 @Controller('api/money')
 export class MoneyController {
-  constructor(private readonly moneyService: MoneyService) {}
+  constructor(
+    private readonly moneyService: MoneyService,
+    private readonly guidanceService: FinancialGuidanceService,
+  ) {}
+
+  @Get('guidance')
+  getGuidance(@CurrentUserId() userId: string) {
+    return this.guidanceService.getGuidance(userId);
+  }
 
   @Get('categories')
   getCategories(
